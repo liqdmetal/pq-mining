@@ -104,8 +104,11 @@ def selection_threshold(target_weight: int, steps: int) -> int:
     """
     if not (0 < target_weight <= steps):
         raise DecoupledError("target_weight must be in (0, steps]")
+    # The selector compares an 8-bit value in [0, 256).  A threshold of
+    # 256 is the only value that selects every step; keep the full endpoint
+    # rather than silently turning target_weight == steps into 255/256.
     threshold = round(256 * target_weight / steps)
-    return max(1, min(255, threshold))
+    return max(1, min(256, threshold))
 
 
 _DECOUPLED_KERNEL = r"""

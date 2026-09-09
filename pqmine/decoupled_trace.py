@@ -56,6 +56,8 @@ def trace_decoupled_walk(
         raise ValueError("columns must not be empty")
     if not (0 < target_weight <= params.steps):
         raise ValueError("target_weight must lie in (0, steps]")
+    if target_weight > len(columns):
+        raise ValueError("target_weight cannot exceed available columns")
     if len(arena) != params.arena_bytes:
         raise ValueError("arena size does not match latency parameters")
 
@@ -76,6 +78,10 @@ def trace_decoupled_walk(
         visited.append(address)
 
         if (x >> 56) < threshold:
+            # Once every column is selected, there is no new distinct support
+            # element. Do not spin forever trying to rehash into one.
+            if len(used) == len(columns):
+                continue
             y = x
             column = y % len(columns)
             while column in used:

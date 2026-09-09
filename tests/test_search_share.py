@@ -2,9 +2,16 @@
 
 import unittest
 
+from pqmine.decoupled import selection_threshold
 from pqmine.latency_bound import LatencyParameters
 from pqmine.search_share import SearchShareError, search_reference
 from pqmine.verifier import PoWParams, verify_share
+
+
+class SelectionThresholdTests(unittest.TestCase):
+    def test_full_target_selects_every_step(self):
+        self.assertEqual(selection_threshold(32, 32), 256)
+        self.assertEqual(selection_threshold(1, 1), 256)
 
 
 class ReferenceSearchTests(unittest.TestCase):
@@ -81,6 +88,30 @@ class ReferenceSearchTests(unittest.TestCase):
         )
         self.assertLessEqual(result.nonces_tested, 1)
         self.assertEqual(result.nonces_tested, 1)
+
+    def test_target_weight_above_columns_rejected(self):
+        with self.assertRaises(SearchShareError):
+            search_reference(
+                b"too-many-columns", self.pow, self.walk,
+                target_weight=self.pow.n_columns + 1,
+                max_nonces=1,
+            )
+
+    def test_full_support_does_not_spin(self):
+        from pqmine.decoupled_trace import trace_decoupled_walk
+        from pqmine.latency_bound import build_arena
+
+        tiny_walk = LatencyParameters(
+            arena_bits=8, steps=64, write_density=1, cell_bytes=8,
+        )
+        trace = trace_decoupled_walk(
+            build_arena(b"full-support-test", tiny_walk),
+            0, tiny_walk, tuple(range(4)), target_weight=4,
+        )
+        self.assertEqual(len(trace.selected_columns), 4)
+        self.assertEqual(len(set(trace.selected_columns)), 4)
+        self.assertEqual(trace.steps, 64)
+
 
     def test_bad_inputs_rejected(self):
         with self.assertRaises(SearchShareError):

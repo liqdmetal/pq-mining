@@ -73,6 +73,8 @@ def _search_nonce(
         raise SearchShareError("nonce must be a uint64")
     if not (0 < target_weight <= latency_params.steps):
         raise SearchShareError("target_weight must lie in (0, steps]")
+    if target_weight > pow_params.n_columns:
+        raise SearchShareError("target_weight cannot exceed available columns")
 
     columns, target = derive_instance(header, pow_params, nonce)
     trace = trace_decoupled_walk(
