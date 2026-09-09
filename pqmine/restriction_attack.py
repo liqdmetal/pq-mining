@@ -1,0 +1,389 @@
+"""Attacking the walk-restriction risk: is the SDP instance still hard?
+
+THE RISK, STATED PRECISELY
+--------------------------
+`latency_bound.py` accepts a share when the syndrome accumulated along a
+K-step walk equals the target. But the walk visits only addresses its own
+data-dependent chain produces, so the set of REACHABLE column multisets is
+a vanishing fraction of all weight-K supports. If that restricted set has
+exploitable structure, an attacker decodes faster than generic ISD and the
+"Classic McEliece assumption" claim collapses.
+
+This is the same failure mode as Esser-Santini (CRYPTO 2024) on REGULAR
+syndrome decoding: adding structure to make a problem convenient made it
+easier to attack. I flagged it as UNANALYSED; this module analyses it.
+
+FOUR CONCRETE ATTACKS TESTED HERE
+---------------------------------
+1. COLUMN BIAS. If the walk's column-selection is non-uniform, some columns
+   appear far more often than others, and an attacker can restrict search to
+   the frequent ones. Measured with a chi-square test against uniform, the
+   same check PoSME applies to its address distribution (they report
+   chi2/df = 1.0004 at 2^24).
+
+2. SHORT CYCLES. A pointer chase over a finite arena must eventually cycle.
+   If cycles are short, the walk revisits the same cells, and over F_2 a
+   column XORed twice CANCELS -- so a short cycle collapses the effective
+   weight and the syndrome lands in a tiny subspace. This is the most
+   dangerous of the four because it is a hard structural break, not a
+   statistical bias.
+
+3. SYNDROME CONCENTRATION. If accumulated syndromes cluster instead of
+   spreading over the (n-k)-bit space, difficulty is not what the parameters
+   claim: an attacker aims at the dense region.
+
+4. PREFIX REUSE. Walks for different nonces share no prefix (each nonce
+   seeds a different start), but if they CONVERGE onto a common path an
+   attacker amortises work across nonces -- breaking the per-nonce
+   independence that difficulty calculations assume.
+
+WHAT A PASS AND A FAIL MEAN
+---------------------------
+A pass here does NOT prove the composition secure -- these are the attacks I
+thought of, run at toy scale. A fail is conclusive in the other direction:
+it means the design is broken and must change. Negative results are the
+point.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import math
+from collections import Counter
+from dataclasses import dataclass
+
+from .codebased import CodeBasedError, SDPParameters, derive_columns
+from .latency_bound import LatencyParameters, build_arena, walk
+
+
+@dataclass(frozen=True)
+class BiasReport:
+    """Chi-square uniformity test on selected columns."""
+
+    samples: int
+    categories: int
+    chi_square: float
+    degrees_of_freedom: int
+    chi_square_per_df: float
+    max_frequency_ratio: float
+
+    @property
+    def uniform(self) -> bool:
+        """chi2/df near 1.0 indicates uniformity.
+
+        Bounds chosen loosely (0.5-2.0): a toy-scale sample is noisy, and
+        the question is whether there is GROSS bias an attacker could use,
+        not whether the mixer is a perfect PRF.
+        """
+        return 0.5 <= self.chi_square_per_df <= 2.0
+
+    def summary(self) -> dict:
+        return {
+            "samples": self.samples,
+            "categories": self.categories,
+            "chi_square_per_df": round(self.chi_square_per_df, 4),
+            "max_frequency_ratio": round(self.max_frequency_ratio, 3),
+            "uniform": self.uniform,
+            "verdict": (
+                "no gross column bias detected"
+                if self.uniform else
+                "BIASED: an attacker can restrict search to frequent columns"
+            ),
+        }
+
+
+def column_bias(header: bytes, sdp: SDPParameters,
+                params: LatencyParameters, nonces: int = 64) -> BiasReport:
+    """Chi-square test: are columns selected uniformly across walks?"""
+    if nonces <= 0:
+        raise CodeBasedError("nonces must be positive")
+    columns = derive_columns(header, sdp)
+    counts = Counter()
+
+    for nonce in range(nonces):
+        arena = build_arena(header, params)
+        result = walk(arena, header, nonce, params, columns)
+        # Recover which column index each visited cell selected.
+        for address in result.visited:
+            offset = address * params.cell_bytes
+            value = int.from_bytes(arena[offset:offset + 8], "little")
+            counts[value % len(columns)] += 1
+
+    total = sum(counts.values())
+    categories = len(columns)
+    expected = total / categories
+    chi_square = sum(
+        (counts.get(index, 0) - expected) ** 2 / expected
+        for index in range(categories)
+    )
+    degrees = categories - 1
+    frequencies = [counts.get(i, 0) for i in range(categories)]
+    lowest = max(1, min(frequencies))
+
+    return BiasReport(
+        samples=total,
+        categories=categories,
+        chi_square=chi_square,
+        degrees_of_freedom=degrees,
+        chi_square_per_df=chi_square / degrees if degrees else 0.0,
+        max_frequency_ratio=max(frequencies) / lowest,
+    )
+
+
+@dataclass(frozen=True)
+class CycleReport:
+    """Revisit statistics for one walk -- the dangerous structural attack."""
+
+    steps: int
+    distinct_addresses: int
+    revisits: int
+    longest_run_without_revisit: int
+    effective_weight: int
+
+    @property
+    def revisit_rate(self) -> float:
+        return self.revisits / self.steps if self.steps else 0.0
+
+    @property
+    def weight_collapse_ratio(self) -> float:
+        """effective/nominal weight. Over F_2 an even number of visits to
+        the same column contributes NOTHING, so this measures how much of
+        the claimed weight survives."""
+        return self.effective_weight / self.steps if self.steps else 0.0
+
+    @property
+    def healthy(self) -> bool:
+        return self.weight_collapse_ratio > 0.5
+
+    def summary(self) -> dict:
+        return {
+            "steps": self.steps,
+            "distinct_addresses": self.distinct_addresses,
+            "revisits": self.revisits,
+            "revisit_rate": round(self.revisit_rate, 4),
+            "effective_weight": self.effective_weight,
+            "weight_collapse_ratio": round(self.weight_collapse_ratio, 4),
+            "healthy": self.healthy,
+            "verdict": (
+                "no significant weight collapse"
+                if self.healthy else
+                "COLLAPSED: XOR cancellation from revisits destroys the "
+                "claimed error weight; the syndrome lives in a small "
+                "subspace and the SDP instance is not what it claims"
+            ),
+        }
+
+
+def cycle_analysis(header: bytes, sdp: SDPParameters,
+                   params: LatencyParameters, nonce: int = 0) -> CycleReport:
+    """Measure revisits and the resulting XOR cancellation.
+
+    Over F_2, visiting the same column an even number of times contributes
+    zero to the syndrome. The EFFECTIVE weight is therefore the number of
+    columns visited an ODD number of times -- which is what the verifier's
+    weight claim really rests on.
+    """
+    columns = derive_columns(header, sdp)
+    arena = build_arena(header, params)
+    result = walk(arena, header, nonce, params, columns)
+
+    seen = set()
+    revisits = 0
+    current_run = 0
+    longest_run = 0
+    for address in result.visited:
+        if address in seen:
+            revisits += 1
+            longest_run = max(longest_run, current_run)
+            current_run = 0
+        else:
+            seen.add(address)
+            current_run += 1
+    longest_run = max(longest_run, current_run)
+
+    # Effective weight: columns selected an ODD number of times.
+    column_counts = Counter()
+    for address in result.visited:
+        offset = address * params.cell_bytes
+        value = int.from_bytes(arena[offset:offset + 8], "little")
+        column_counts[value % len(columns)] += 1
+    effective = sum(1 for count in column_counts.values() if count % 2 == 1)
+
+    return CycleReport(
+        steps=result.steps,
+        distinct_addresses=len(seen),
+        revisits=revisits,
+        longest_run_without_revisit=longest_run,
+        effective_weight=effective,
+    )
+
+
+@dataclass(frozen=True)
+class ConcentrationReport:
+    """Are accumulated syndromes spread or clustered?"""
+
+    samples: int
+    distinct_syndromes: int
+    most_common_count: int
+    syndrome_bits: int
+
+    @property
+    def collision_rate(self) -> float:
+        return 1.0 - (self.distinct_syndromes / self.samples) \
+            if self.samples else 0.0
+
+    @property
+    def expected_distinct(self) -> float:
+        """Birthday expectation for `samples` draws from 2^bits."""
+        space = 2.0 ** self.syndrome_bits
+        return space * (1.0 - math.exp(-self.samples / space))
+
+    @property
+    def spread(self) -> bool:
+        """Observed distinct count should be near the birthday expectation."""
+        return self.distinct_syndromes >= 0.9 * self.expected_distinct
+
+    def summary(self) -> dict:
+        return {
+            "samples": self.samples,
+            "distinct_syndromes": self.distinct_syndromes,
+            "expected_distinct": round(self.expected_distinct, 1),
+            "most_common_count": self.most_common_count,
+            "collision_rate": round(self.collision_rate, 5),
+            "spread": self.spread,
+            "verdict": (
+                "syndromes spread as expected for a random map"
+                if self.spread else
+                "CONCENTRATED: syndromes cluster, so real difficulty is "
+                "lower than the parameters claim"
+            ),
+        }
+
+
+def syndrome_concentration(header: bytes, sdp: SDPParameters,
+                           params: LatencyParameters,
+                           nonces: int = 512) -> ConcentrationReport:
+    """Sample many nonces and check the syndrome distribution."""
+    columns = derive_columns(header, sdp)
+    syndromes = Counter()
+    for nonce in range(nonces):
+        arena = build_arena(header, params)
+        syndromes[walk(arena, header, nonce, params, columns).syndrome] += 1
+
+    return ConcentrationReport(
+        samples=nonces,
+        distinct_syndromes=len(syndromes),
+        most_common_count=syndromes.most_common(1)[0][1],
+        syndrome_bits=sdp.syndrome_bits,
+    )
+
+
+@dataclass(frozen=True)
+class ConvergenceReport:
+    """Do walks for different nonces merge onto shared paths?"""
+
+    pairs_compared: int
+    max_shared_suffix: int
+    mean_shared_suffix: float
+    steps: int
+
+    @property
+    def independent(self) -> bool:
+        """Sharing more than a tenth of the path would let an attacker
+        amortise work across nonces."""
+        return self.max_shared_suffix < max(2, self.steps // 10)
+
+    def summary(self) -> dict:
+        return {
+            "pairs_compared": self.pairs_compared,
+            "steps": self.steps,
+            "max_shared_suffix": self.max_shared_suffix,
+            "mean_shared_suffix": round(self.mean_shared_suffix, 2),
+            "independent": self.independent,
+            "verdict": (
+                "walks stay independent across nonces"
+                if self.independent else
+                "CONVERGENT: nonces share long path suffixes, so work "
+                "amortises across nonces and per-nonce difficulty is wrong"
+            ),
+        }
+
+
+def path_convergence(header: bytes, sdp: SDPParameters,
+                     params: LatencyParameters,
+                     nonces: int = 24) -> ConvergenceReport:
+    """Compare walk paths pairwise for shared suffixes."""
+    columns = derive_columns(header, sdp)
+    paths = []
+    for nonce in range(nonces):
+        arena = build_arena(header, params)
+        paths.append(walk(arena, header, nonce, params, columns).visited)
+
+    longest = 0
+    total = 0
+    pairs = 0
+    for i in range(len(paths)):
+        for j in range(i + 1, len(paths)):
+            left, right = paths[i], paths[j]
+            shared = 0
+            for a, b in zip(reversed(left), reversed(right)):
+                if a != b:
+                    break
+                shared += 1
+            longest = max(longest, shared)
+            total += shared
+            pairs += 1
+
+    return ConvergenceReport(
+        pairs_compared=pairs,
+        max_shared_suffix=longest,
+        mean_shared_suffix=total / pairs if pairs else 0.0,
+        steps=params.steps,
+    )
+
+
+def full_audit(header: bytes, sdp: SDPParameters,
+               params: LatencyParameters) -> dict:
+    """Run all four attacks and report a single verdict."""
+    bias = column_bias(header, sdp, params, nonces=16)
+    cycles = cycle_analysis(header, sdp, params)
+    concentration = syndrome_concentration(header, sdp, params, nonces=256)
+    convergence = path_convergence(header, sdp, params, nonces=16)
+
+    failures = []
+    if not bias.uniform:
+        failures.append("column bias")
+    if not cycles.healthy:
+        failures.append("weight collapse from revisits")
+    if not concentration.spread:
+        failures.append("syndrome concentration")
+    if not convergence.independent:
+        failures.append("path convergence across nonces")
+
+    return {
+        "column_bias": bias.summary(),
+        "cycles": cycles.summary(),
+        "concentration": concentration.summary(),
+        "convergence": convergence.summary(),
+        "failures": failures,
+        "passed": not failures,
+        "caveat": (
+            "these are the attacks I thought of, at toy scale. Passing does "
+            "NOT establish security -- the restricted-support question needs "
+            "a profile-aware ISD analysis by a coding theorist. Failing IS "
+            "conclusive: it means the construction is broken."
+        ),
+    }
+
+
+__all__ = [
+    "BiasReport",
+    "ConcentrationReport",
+    "ConvergenceReport",
+    "CycleReport",
+    "column_bias",
+    "cycle_analysis",
+    "full_audit",
+    "path_convergence",
+    "syndrome_concentration",
+]
