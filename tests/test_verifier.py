@@ -66,12 +66,27 @@ class VerifierRuleTests(unittest.TestCase):
             self.assertIn("w_max", v.reason)
 
     def test_wrong_header_rejected(self):
-        """H and s come from the header; a share for one header is not a
-        share for another."""
-        moved = Share(b"other-header", 0, self.share.support)
+        """H and s come from the bound header/nonce instance."""
+        moved = Share(b"other-header", self.share.nonce, self.share.support)
         v = verify_share(moved, self.params)
         self.assertFalse(v.valid)
         self.assertIn("syndrome", v.reason)
+
+    def test_nonce_replay_rejected(self):
+        """A support valid for nonce n must not replay at nonce n+1."""
+        moved = Share(self.header, self.share.nonce + 1, self.share.support)
+        v = verify_share(moved, self.params)
+        self.assertFalse(v.valid)
+        self.assertIn("syndrome", v.reason)
+
+    def test_nonce_is_bound_in_the_instance(self):
+        a = derive_columns(self.header, self.params, 0)
+        b = derive_columns(self.header, self.params, 1)
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(
+            derive_target(self.header, self.params, 0),
+            derive_target(self.header, self.params, 1),
+        )
 
     def test_perturbed_support_rejected(self):
         sup = list(self.share.support)

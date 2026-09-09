@@ -85,15 +85,45 @@ def log2_binom(n: int, k: int) -> float:
 
 
 def log2_expected_solutions(n: int, k: int, w: int, matched_bits: int | None = None) -> float:
-    """log2 E[#weight-w e with He^T = s on `matched_bits` syndrome bits].
+    """log2 E[#exact-weight-w e with H e^T = s on matched bits].
 
-    matched_bits defaults to the full n-k. Fewer matched bits = more
-    solutions = easier; this is the retarget lever.
+    This exact-weight quantity is retained for paper comparisons. The
+    consensus verifier accepts every weight in ``1..w_max``; use
+    :func:`log2_expected_bounded_solutions` for the actual language.
     """
     t = (n - k) if matched_bits is None else matched_bits
     if not (0 <= t <= n - k):
         raise CalibrationError("matched_bits must be in [0, n-k]")
     return log2_binom(n, w) - t
+
+
+def log2_expected_bounded_solutions(
+    n: int, k: int, w_max: int, matched_bits: int | None = None,
+) -> float:
+    """log2 expected accepted supports of weights ``1..w_max``.
+
+    This is the satisfiability quantity for the shipped verifier, which uses
+    a bounded-weight language rather than an exact-weight language.
+    """
+    t = (n - k) if matched_bits is None else matched_bits
+    if not (0 <= t <= n - k):
+        raise CalibrationError("matched_bits must be in [0, n-k]")
+    if not (0 < w_max <= n):
+        raise CalibrationError("w_max must lie in (0,n]")
+    terms = [log2_binom(n, w) - t for w in range(1, w_max + 1)]
+    pivot = max(terms)
+    return pivot + math.log2(sum(2.0 ** (term - pivot) for term in terms))
+
+
+def log2_expected_bounded_solutions_from_syndrome(
+    n: int, syndrome_bits: int, w_max: int, matched_bits: int,
+) -> float:
+    """Named form for callers that specify syndrome dimension directly."""
+    if not (0 < syndrome_bits < n):
+        raise CalibrationError("syndrome_bits must lie in (0,n)")
+    return log2_expected_bounded_solutions(
+        n, n - syndrome_bits, w_max, matched_bits,
+    )
 
 
 def satisfiable_probability(log2_expected: float) -> float:
@@ -253,6 +283,8 @@ __all__ = [
     "difficulty_ladder",
     "log2_binom",
     "log2_expected_solutions",
+    "log2_expected_bounded_solutions",
+    "log2_expected_bounded_solutions_from_syndrome",
     "max_matched_bits",
     "satisfiable_probability",
     "work_bjmm",

@@ -54,6 +54,14 @@ WHAT THIS MODULE MEASURES
      the memory-hard chain length recovers the CPU's per-unit lead now
      that w no longer forces K short.
   3. Satisfiability at the chosen (n, k, w_max) via the calibrator.
+
+IMPLEMENTATION BOUNDARY
+-----------------------
+This module is a benchmark/search component, not a complete consensus miner.
+It uses a synthetic parity-check array and returns a syndrome plus measured
+weight, not a verifier-compatible ``Share`` with the verifier's header/nonce-
+bound columns and serialized support. A complete miner must wire those two
+paths together before any mining or security claim is made.
 """
 
 from __future__ import annotations

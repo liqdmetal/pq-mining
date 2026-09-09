@@ -69,22 +69,35 @@ class Verdict:
     matched: int
 
 
-def derive_columns(header: bytes, params: PoWParams) -> tuple:
-    """Parity-check columns from the header. 256-bit syndrome -> 4 words."""
+def _instance_prefix(header: bytes, nonce: int) -> bytes:
+    """Canonical instance binding for one header/nonce pair."""
+    if not isinstance(header, bytes) or not header:
+        raise ShareError("header must be non-empty bytes")
+    if not (0 <= nonce < 2**64):
+        raise ShareError("nonce must be a uint64")
+    return (len(header).to_bytes(4, "big") + header
+            + nonce.to_bytes(8, "big"))
+
+
+def derive_columns(header: bytes, params: PoWParams, nonce: int = 0) -> tuple:
+    """Parity-check columns from the bound header/nonce instance."""
     words = (params.syndrome_bits + 63) // 64
+    prefix = _instance_prefix(header, nonce)
     out = []
     for j in range(params.n_columns):
         digest = hashlib.shake_256(
-            b"CHITIN-POW-H-V2" + header + j.to_bytes(4, "big")
+            b"CHITIN-POW-H-V2" + prefix + j.to_bytes(4, "big")
         ).digest(8 * words)
         out.append(int.from_bytes(digest, "big"))
     return tuple(out)
 
 
-def derive_target(header: bytes, params: PoWParams) -> int:
+def derive_target(header: bytes, params: PoWParams, nonce: int = 0) -> int:
+    """Target syndrome from the bound header/nonce instance."""
     words = (params.syndrome_bits + 63) // 64
+    prefix = _instance_prefix(header, nonce)
     return int.from_bytes(
-        hashlib.shake_256(b"CHITIN-POW-S-V2" + header).digest(8 * words), "big"
+        hashlib.shake_256(b"CHITIN-POW-S-V2" + prefix).digest(8 * words), "big"
     )
 
 
@@ -113,8 +126,8 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
                        len(support), 0)
 
     # (3) syndrome relation on the matched bits. (4) H, s from header.
-    columns = derive_columns(share.header, params)
-    target = derive_target(share.header, params)
+    columns = derive_columns(share.header, params, share.nonce)
+    target = derive_target(share.header, params, share.nonce)
     acc = 0
     for j in support:
         acc ^= columns[j]
@@ -128,13 +141,12 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
 
 
 def expected_work_log2(params: PoWParams) -> float:
-    """log2 of expected candidate weight-<=w_max supports per solution.
+    """Log2 of the honest random-candidate work, approximately ``t``.
 
-    Each candidate matches the t difficulty bits with probability 2^-t, so
-    ~2^t candidates per share. This is the miner's honest cost; the
-    ATTACKER's cost is bounded below by the Stern/BJMM ISD figures in
-    pqmine/calibration.py, which is what secures the difficulty against a
-    smarter-than-brute-force solver.
+    This is only the nonce/candidate sampling cost. It is not an attacker
+    security estimate; the bounded-language attack analysis lives in
+    ``pqmine.bounded_work`` and currently gives only an upper bound on
+    security. No Stern/BJMM security claim is made here.
     """
     return float(params.matched_bits)
 

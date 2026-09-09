@@ -22,14 +22,14 @@ its hardness assumption is itself a PQ assumption, not merely a hash.
 
 | claim | status | evidence |
 |---|---|---|
-| post-quantum assumption | **yes** | syndrome decoding, §1 |
-| satisfiable every block | **yes** | §5, P(sat)=1.000 |
-| smoothly retargetable | **yes** | §5, 1-bit steps |
-| cheap verification | **yes** | §4, `w_max` XORs |
-| exact-weight accounting | **yes** | verifier rule (1) |
-| ASIC-proof | **no** | any fixed function can be cast in silicon |
-| **CPU-favoured** | **no** | §6 — GPU wins **4.5–16×**, measured |
-| certified security level | **no** | ISD model, not external review |
+| code-based PQ assumption used | **yes, uncertified** | syndrome decoding, §1 |
+|| satisfiable at recommended target | **modeled yes** | §5, expected-solutions model; not every block guaranteed |
+|| smoothly retargetable | **yes mechanically** | §5, 1-bit steps; security calibration is open |
+|| cheap verification | **yes** | §4, `w_max` XORs |
+|| bounded-weight accounting | **yes** | verifier accepts `1..w_max` |
+|| ASIC-proof | **no** | any fixed function can be cast in silicon |
+|| **CPU-favoured** | **no** | §6 — GPU wins **4.5–16×**, measured |
+|| certified security level | **no** | bounded MITM is only an attack upper bound |
 
 The honest one-line pitch: **a post-quantum PoW with a bounded, measured
 GPU advantage of ~5–8× at the recommended operating point.** That is in
@@ -98,15 +98,22 @@ Solution: retarget on **matched syndrome bits** `t ∈ [1, 256]`.
   → **`t_cap = 164`** at `w_max=32`, `P(sat) = 1.000`
 - Each `t` step is exactly 1 bit — same granularity as a hash target
 
-Attacker model: work is scored against **Stern** (what honest miners run)
-and **BJMM** (the attacker's edge, published as a factor). May–Ozerov is
-deliberately excluded — its `2^{0.0966n}` only beats Stern at astronomical
-`n` (a "galactic algorithm") and would understate work by orders of
-magnitude. Model validated: McEliece `n=1024, k=524, w=50` → **65.4 bits**
-vs literature 60–65.
+The old full-syndrome Stern/BJMM comparison is **not applicable** after
+retargeting to a partial syndrome and accepting all weights `1..w_max`.
+It is retired, not silently reused.
 
-At the recommended point (`w_max=32`, `t=164`): **attacker edge 2.67 bits**
-(BJMM over Stern). That is the number to publish.
+The current conservative published attack is the bounded-language two-list
+meet-in-the-middle calculation in `pqmine/bounded_work.py`:
+
+- `n=512`, `syndrome_bits=256`, `w_max=32`, `t=164`;
+- satisfiability: `log2(E[accepted supports]) = 5.0086`;
+- simple MITM attack: **83.06 bits of work**, using two lists of weight 16;
+- memory for the larger list: **2^83.06 entries** before implementation
+  compression and representation costs.
+
+This is an **attack upper bound on security**, not a security claim. A better
+bounded-weight or structured-support attack may be faster. No certified
+security level is assigned until a coding theorist reviews the model.
 
 ## 6. Hardware profile — measured, not asserted
 
@@ -143,12 +150,22 @@ assumption in the PoW. Option 2 keeps the assumption and accepts the GPU.
 ## 7. Search procedure (non-consensus) — `pqmine/decoupled.py`
 
 Per nonce: an L1-sized mutable scratchpad drives a K-step data-dependent
-walk; at each step a hash bit decides whether to select the addressed
-column (distinctness enforced via a used-set); the walk's accumulated
-syndrome is checked against `s` on `t` bits. Weight lands on target with
-binomial spread (mean 31.7 at `w=32`, max ≤ 49, so `w_max` should be set
-≥ the observed max or the target lowered). Miners may replace this
-entirely; only §4 is consensus.
+walk; at each step a hash bit decides whether to select a column (distinctness
+enforced via a used-set); the walk's accumulated syndrome is checked against
+`s` on `t` bits.
+
+The CUDA/Numba `decoupled.py` path is a **benchmark component**, not yet a
+complete miner: it uses synthetic H and returns a syndrome/weight. The slow
+CPU `search_share.py` reference path now derives H and s through the
+consensus verifier, retains the selected support, constructs a real
+`Share(header, nonce, support)`, and self-verifies it before reporting success.
+It is test-scale only; it is not a production search path.
+
+The selector has binomial spread rather than exact weight. A full run measured
+mean 31.7 and maximum 49 for a target of 32; therefore the shipped verifier
+must retain the explicit `w_max` cap, and the expected-weight statement is
+not a proof that all walk outputs are admissible. Miners may replace the
+search entirely; only §4 is consensus.
 
 ## 8. Quantum accounting
 

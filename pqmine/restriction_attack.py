@@ -53,7 +53,8 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .codebased import CodeBasedError, SDPParameters, derive_columns
-from .latency_bound import LatencyParameters, build_arena, walk
+from .decoupled_trace import trace_decoupled_walk
+from .latency_bound import LatencyParameters, build_arena
 
 
 @dataclass(frozen=True)
@@ -93,21 +94,22 @@ class BiasReport:
 
 
 def column_bias(header: bytes, sdp: SDPParameters,
-                params: LatencyParameters, nonces: int = 64) -> BiasReport:
-    """Chi-square test: are columns selected uniformly across walks?"""
+                params: LatencyParameters, nonces: int = 64,
+                target_weight: int | None = None) -> BiasReport:
+    """Chi-square test on columns selected by the decoupled search trace."""
     if nonces <= 0:
         raise CodeBasedError("nonces must be positive")
+    target = sdp.weight if target_weight is None else target_weight
     columns = derive_columns(header, sdp)
     counts = Counter()
 
     for nonce in range(nonces):
         arena = build_arena(header, params)
-        result = walk(arena, header, nonce, params, columns)
-        # Recover which column index each visited cell selected.
-        for address in result.visited:
-            offset = address * params.cell_bytes
-            value = int.from_bytes(arena[offset:offset + 8], "little")
-            counts[value % len(columns)] += 1
+        result = trace_decoupled_walk(
+            arena, nonce, params, columns, target,
+        )
+        for column in result.selected_columns:
+            counts[column] += 1
 
     total = sum(counts.values())
     categories = len(columns)
@@ -135,6 +137,7 @@ class CycleReport:
     """Revisit statistics for one walk -- the dangerous structural attack."""
 
     steps: int
+    selected_weight: int
     distinct_addresses: int
     revisits: int
     longest_run_without_revisit: int
@@ -146,18 +149,25 @@ class CycleReport:
 
     @property
     def weight_collapse_ratio(self) -> float:
-        """effective/nominal weight. Over F_2 an even number of visits to
-        the same column contributes NOTHING, so this measures how much of
-        the claimed weight survives."""
-        return self.effective_weight / self.steps if self.steps else 0.0
+        """effective/selected weight after F_2 parity cancellation.
+
+        The decoupled selector intentionally selects only about ``w`` columns
+        during ``K`` memory-hard steps. Comparing effective weight with K was
+        an audit bug: it called the deliberate selector sparse weight collapse.
+        """
+        return (
+            self.effective_weight / self.selected_weight
+            if self.selected_weight else 0.0
+        )
 
     @property
     def healthy(self) -> bool:
-        return self.weight_collapse_ratio > 0.5
+        return self.selected_weight > 0 and self.weight_collapse_ratio > 0.5
 
     def summary(self) -> dict:
         return {
             "steps": self.steps,
+            "selected_weight": self.selected_weight,
             "distinct_addresses": self.distinct_addresses,
             "revisits": self.revisits,
             "revisit_rate": round(self.revisit_rate, 4),
@@ -175,17 +185,13 @@ class CycleReport:
 
 
 def cycle_analysis(header: bytes, sdp: SDPParameters,
-                   params: LatencyParameters, nonce: int = 0) -> CycleReport:
-    """Measure revisits and the resulting XOR cancellation.
-
-    Over F_2, visiting the same column an even number of times contributes
-    zero to the syndrome. The EFFECTIVE weight is therefore the number of
-    columns visited an ODD number of times -- which is what the verifier's
-    weight claim really rests on.
-    """
+                   params: LatencyParameters, nonce: int = 0,
+                   target_weight: int | None = None) -> CycleReport:
+    """Measure address revisits and selected-column parity in the decoupled trace."""
+    target = sdp.weight if target_weight is None else target_weight
     columns = derive_columns(header, sdp)
     arena = build_arena(header, params)
-    result = walk(arena, header, nonce, params, columns)
+    result = trace_decoupled_walk(arena, nonce, params, columns, target)
 
     seen = set()
     revisits = 0
@@ -201,16 +207,14 @@ def cycle_analysis(header: bytes, sdp: SDPParameters,
             current_run += 1
     longest_run = max(longest_run, current_run)
 
-    # Effective weight: columns selected an ODD number of times.
-    column_counts = Counter()
-    for address in result.visited:
-        offset = address * params.cell_bytes
-        value = int.from_bytes(arena[offset:offset + 8], "little")
-        column_counts[value % len(columns)] += 1
+    # The selector already rehashes duplicate columns, so effective selected
+    # weight equals the selected support size. Keep parity as a diagnostic.
+    column_counts = Counter(result.selected_columns)
     effective = sum(1 for count in column_counts.values() if count % 2 == 1)
 
     return CycleReport(
         steps=result.steps,
+        selected_weight=result.weight,
         distinct_addresses=len(seen),
         revisits=revisits,
         longest_run_without_revisit=longest_run,
@@ -234,9 +238,14 @@ class ConcentrationReport:
 
     @property
     def expected_distinct(self) -> float:
-        """Birthday expectation for `samples` draws from 2^bits."""
+        """Birthday expectation for `samples` draws from 2^bits.
+
+        ``expm1`` is required: at 256 bits, ``1-exp(-samples/space)``
+        cancels to zero in binary64 even though the expectation is about the
+        sample count.
+        """
         space = 2.0 ** self.syndrome_bits
-        return space * (1.0 - math.exp(-self.samples / space))
+        return space * (-math.expm1(-self.samples / space))
 
     @property
     def spread(self) -> bool:
@@ -262,13 +271,18 @@ class ConcentrationReport:
 
 def syndrome_concentration(header: bytes, sdp: SDPParameters,
                            params: LatencyParameters,
-                           nonces: int = 512) -> ConcentrationReport:
-    """Sample many nonces and check the syndrome distribution."""
+                           nonces: int = 512,
+                           target_weight: int | None = None) -> ConcentrationReport:
+    """Sample decoupled-walk syndromes across nonces."""
+    target = sdp.weight if target_weight is None else target_weight
     columns = derive_columns(header, sdp)
     syndromes = Counter()
     for nonce in range(nonces):
         arena = build_arena(header, params)
-        syndromes[walk(arena, header, nonce, params, columns).syndrome] += 1
+        result = trace_decoupled_walk(
+            arena, nonce, params, columns, target,
+        )
+        syndromes[result.syndrome] += 1
 
     return ConcentrationReport(
         samples=nonces,
@@ -311,13 +325,18 @@ class ConvergenceReport:
 
 def path_convergence(header: bytes, sdp: SDPParameters,
                      params: LatencyParameters,
-                     nonces: int = 24) -> ConvergenceReport:
-    """Compare walk paths pairwise for shared suffixes."""
+                     nonces: int = 24,
+                     target_weight: int | None = None) -> ConvergenceReport:
+    """Compare decoupled walk paths pairwise for shared suffixes."""
+    target = sdp.weight if target_weight is None else target_weight
     columns = derive_columns(header, sdp)
     paths = []
     for nonce in range(nonces):
         arena = build_arena(header, params)
-        paths.append(walk(arena, header, nonce, params, columns).visited)
+        trace = trace_decoupled_walk(
+            arena, nonce, params, columns, target,
+        )
+        paths.append(trace.visited)
 
     longest = 0
     total = 0
@@ -343,12 +362,19 @@ def path_convergence(header: bytes, sdp: SDPParameters,
 
 
 def full_audit(header: bytes, sdp: SDPParameters,
-               params: LatencyParameters) -> dict:
-    """Run all four attacks and report a single verdict."""
-    bias = column_bias(header, sdp, params, nonces=16)
-    cycles = cycle_analysis(header, sdp, params)
-    concentration = syndrome_concentration(header, sdp, params, nonces=256)
-    convergence = path_convergence(header, sdp, params, nonces=16)
+               params: LatencyParameters,
+               target_weight: int | None = None) -> dict:
+    """Run all four attacks against the actual decoupled selector."""
+    target = sdp.weight if target_weight is None else target_weight
+    bias = column_bias(header, sdp, params, nonces=16,
+                       target_weight=target)
+    cycles = cycle_analysis(header, sdp, params, target_weight=target)
+    concentration = syndrome_concentration(
+        header, sdp, params, nonces=256, target_weight=target,
+    )
+    convergence = path_convergence(
+        header, sdp, params, nonces=16, target_weight=target,
+    )
 
     failures = []
     if not bias.uniform:
