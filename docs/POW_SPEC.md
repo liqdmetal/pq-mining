@@ -177,41 +177,38 @@ must retain the explicit `w_max` cap, and the expected-weight statement is
 not a proof that all walk outputs are admissible. Miners may replace the
 search entirely; only §4 is consensus.
 
-## 8. Quantum accounting
+## 8. Quantum accounting boundary
 
-At **equal classical security** `2^100`:
+No quantum-security number is certified for this construction. The old
+asymptotic SDP/hash/SVP comparison is not a validated security baseline for
+the current partial-syndrome, bounded-weight, walk-restricted verifier and
+has been removed from the specification.
 
-| PoW type | quantum bits | lost |
-|---|---|---|
-| hash | 50.0 | 50.0 |
-| **SDP (this)** | **60.8** | **39.2** |
-| SVP (lattice) | 90.8 | 9.2 |
+Known qualitative facts only:
 
-SDP is better than hash and markedly worse than lattice for quantum
-resistance specifically. The defensible reason to choose SDP is
-**cryptanalytic stability** (1978 → now, incremental ISD only) versus
-lattice reduction's active frontier, not quantum resistance. Grover on the
-nonce search is further blunted by memory-hardness (the oracle must be a
-reversible circuit over the scratchpad).
+- generic quantum speedups and nonce-search effects require a separate model;
+- the memory-hard walk's reversible-oracle cost has not been analyzed;
+- the walk-restricted support language may admit attacks that invalidate any
+  generic SDP comparison.
 
 ## 9. Open items
 
-- **External review of the ISD calibration.** The Stern/BJMM model is
-  validated on one literature point; the restricted-support structure of
-  §7's walk (only walk-reachable supports are found) has not been reviewed
-  as a distinct decoding problem. Esser–Santini (CRYPTO'24) showed regular
-  SDP admits better attacks; structure added for search convenience can
-  weaken the instance. This is the item that would sink the design.
-- Verifier-side `w_max` vs walk's observed max-weight tail (§7).
+- **External review of the restricted-support decoding problem.** The old
+  full-syndrome Stern/BJMM comparison is retired and does not validate the
+  current partial-syndrome verifier. The walk-reachable support structure has
+  not been reviewed as a distinct decoding problem. Esser–Santini (CRYPTO'24)
+  showed regular SDP admits better attacks; structure added for search
+  convenience can weaken the instance. This is the item that could sink the
+  design.
+- Verifier-side `w_max` versus the walk's observed max-weight tail (§7).
 - No network, no difficulty-adjustment controller, no chain integration.
-- Only one paper on code-based PoW exists (ePrint 2026/1526, months old,
-  self-described preliminary). This is a first implementation, not
-  adoption of proven tech.
+- Only one paper on code-based PoW exists (ePrint 2026/1526, preliminary).
+  This is a first implementation, not adoption of proven technology.
 
 ## 10. Reproduce
 
 ```
-python -m pytest tests/ -q                       # 128 tests
+python -m pytest tests/ -q                       # currently 148 tests + 8 subtests
 python -c "from pqmine.calibration import *; ..."  # §5 numbers
 python -c "from pqmine.fraction_test import fraction_report; fraction_report(2048)"  # §6
 ```

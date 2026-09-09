@@ -7,6 +7,8 @@ construction, not a stale once-per-header matrix.
 
 import unittest
 from collections import Counter
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from pqmine.codebased import SDPParameters
 from pqmine.decoupled_trace import trace_decoupled_walk
@@ -40,6 +42,27 @@ class TestV2ColumnParityCollapse(unittest.TestCase):
             expected = sum(count % 2 for count in Counter(result.selected_columns).values())
             self.assertEqual(result.weight, expected,
                              f"nonce {nonce}: effective {result.weight} != selected {expected}")
+
+
+class TestAuditInputGuards(unittest.TestCase):
+    def test_zero_nonce_concentration_rejected(self):
+        from pqmine.restriction_attack import syndrome_concentration
+        with self.assertRaises(ValueError):
+            syndrome_concentration(
+                b"zero", SDPParameters(n=512, k=256, weight=8),
+                LatencyParameters(arena_bits=8, steps=32), nonces=0,
+            )
+
+    def test_zero_selection_bias_rejected(self):
+        from pqmine import restriction_attack
+        empty = SimpleNamespace(selected_columns=())
+        with patch.object(restriction_attack, "trace_decoupled_walk", return_value=empty):
+            with self.assertRaises(ValueError):
+                restriction_attack.column_bias(
+                    b"zero", SDPParameters(n=512, k=256, weight=8),
+                    LatencyParameters(arena_bits=8, steps=8),
+                    nonces=1, target_weight=1,
+                )
 
 
 class TestConcentrationReportDisplay(unittest.TestCase):

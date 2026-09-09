@@ -125,6 +125,8 @@ def column_bias(header: bytes, sdp: SDPParameters,
             counts[column] += 1
 
     total = sum(counts.values())
+    if total == 0:
+        raise CodeBasedError("walk produced no selected columns")
     categories = len(columns)
     expected = total / categories
     chi_square = sum(
@@ -287,6 +289,8 @@ def syndrome_concentration(header: bytes, sdp: SDPParameters,
                            nonces: int = 512,
                            target_weight: int | None = None) -> ConcentrationReport:
     """Sample decoupled-walk syndromes across nonces."""
+    if nonces <= 0:
+        raise CodeBasedError("nonces must be positive")
     target = sdp.weight if target_weight is None else target_weight
     syndromes = Counter()
     for nonce in range(nonces):
