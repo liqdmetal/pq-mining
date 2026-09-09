@@ -88,7 +88,7 @@ Accept a share `(header, nonce, support)` iff:
 2. `|support| ≤ w_max`. Bounded, not exact: a heavier error is a weaker
    claim, so the verifier accepts at-or-under and difficulty assumes the cap.
 3. `⊕_{j∈support} H[:,j]` equals `s` on the top `t` bits.
-4. `H` and `s` are derived from the header (`SHAKE-256`), never supplied.
+4. `H` and `s` are derived from the bound `(header, nonce)` instance (`SHAKE-256`), never supplied by the miner.
 
 Cost: ≤ 32 XORs of 256-bit words. **The K-step walk is never re-executed**
 — it is the search, not the proof. 11 adversarial tests including the
