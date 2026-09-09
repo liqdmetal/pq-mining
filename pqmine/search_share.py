@@ -115,10 +115,12 @@ def search_reference(
 
     started = time.perf_counter()
     last_weight = 0
+    nonces_tested = 0
     for offset in range(max_nonces):
         nonce = first_nonce + offset
         if nonce >= 2**64:
             break
+        nonces_tested += 1
         share, last_weight = _search_nonce(
             header, nonce, pow_params, latency_params, target_weight,
         )
@@ -127,7 +129,7 @@ def search_reference(
             return ReferenceSearchResult(
                 share=share,
                 verdict=verdict,
-                nonces_tested=offset + 1,
+                nonces_tested=nonces_tested,
                 steps_per_nonce=latency_params.steps,
                 selected_weight=last_weight,
                 seconds=time.perf_counter() - started,
@@ -135,7 +137,7 @@ def search_reference(
     return ReferenceSearchResult(
         share=None,
         verdict=None,
-        nonces_tested=max_nonces,
+        nonces_tested=nonces_tested,
         steps_per_nonce=latency_params.steps,
         selected_weight=last_weight,
         seconds=time.perf_counter() - started,

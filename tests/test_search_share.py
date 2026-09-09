@@ -70,6 +70,18 @@ class ReferenceSearchTests(unittest.TestCase):
         self.assertFalse(result.found)
         self.assertGreaterEqual(result.selected_weight, strict.w_max)
 
+    def test_nonce_boundary_reports_actual_coverage(self):
+        result = search_reference(
+            b"nonce-boundary-test",
+            self.pow,
+            self.walk,
+            target_weight=4,
+            first_nonce=(2**64) - 1,
+            max_nonces=4,
+        )
+        self.assertLessEqual(result.nonces_tested, 1)
+        self.assertEqual(result.nonces_tested, 1)
+
     def test_bad_inputs_rejected(self):
         with self.assertRaises(SearchShareError):
             search_reference(b"", self.pow, self.walk, target_weight=4)
