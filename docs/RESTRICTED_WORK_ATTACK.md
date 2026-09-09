@@ -43,6 +43,29 @@ that, after conditioning on admissible weight, the nonce-bound syndrome prefix
 is uniform. That assumption is unproved and is the subject of the structural
 audit; it must not be presented as a security theorem.
 
+## Multi-level bounded-language family
+
+`pqmine/bdd_attack.py` evaluates a small, explicit family of one-, two-, and
+four-partition shapes. It uses the same two-group batching equation as the
+baseline after grouping intermediate lists, and sweeps every accepted support
+weight `1..w_max`. This is a symbolic cost family, not a complete BDD/ISD
+algorithm or an optimality result.
+
+At the recommended parameters:
+
+```text
+classical two-list baseline: 83.059519 bits
+best tested multi-level:    83.059519 bits
+best tested weight:         32
+best tested partition:      (256, 256)
+improvement:                false
+```
+
+The tested multi-level family therefore does not lower the current 83.06-bit
+attack upper bound. It also does not validate that bound as a security level:
+other partitions, actual list-merging strategies, partial-syndrome ISD/BDD
+methods, quantum attacks, and walk-structure attacks remain outside this model.
+
 ## Interpretation
 
 - The walk's observed admissibility rate is about **57.8%** in this bounded

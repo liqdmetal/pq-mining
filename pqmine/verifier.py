@@ -110,10 +110,14 @@ def derive_instance(header: bytes, params: PoWParams, nonce: int = 0) -> tuple[t
     return derive_columns(header, params, nonce), derive_target(header, params, nonce)
 
 
-def _mask(params: PoWParams) -> int:
-    """Top matched_bits of the syndrome. Difficulty = how many must match."""
+def syndrome_mask(params: PoWParams) -> int:
+    """Return the canonical top-``matched_bits`` syndrome mask."""
     total = 64 * ((params.syndrome_bits + 63) // 64)
     return ((1 << params.matched_bits) - 1) << (total - params.matched_bits)
+
+
+# Private compatibility alias for existing internal callers.
+_mask = syndrome_mask
 
 
 def verify_share(share: Share, params: PoWParams) -> Verdict:
@@ -169,5 +173,6 @@ __all__ = [
     "derive_instance",
     "derive_target",
     "expected_work_log2",
+    "syndrome_mask",
     "verify_share",
 ]

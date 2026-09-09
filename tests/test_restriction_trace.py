@@ -14,7 +14,7 @@ from pqmine.codebased import SDPParameters
 from pqmine.decoupled_trace import trace_decoupled_walk
 from pqmine.latency_bound import LatencyParameters, build_arena
 from pqmine.verifier import PoWParams, derive_columns as derive_v2_columns
-from pqmine.restriction_attack import ConcentrationReport, cycle_analysis
+from pqmine.restriction_attack import ConcentrationReport, cycle_analysis, full_audit
 
 
 def derive_v2_columns_one(header: bytes, sdp: SDPParameters, nonce: int) -> tuple:
@@ -63,6 +63,19 @@ class TestAuditInputGuards(unittest.TestCase):
                     LatencyParameters(arena_bits=8, steps=8),
                     nonces=1, target_weight=1,
                 )
+
+
+class TestFullAuditParameters(unittest.TestCase):
+    def test_full_audit_reports_explicit_cap(self):
+        report = full_audit(
+            b"audit-cap",
+            SDPParameters(n=512, k=256, weight=8),
+            LatencyParameters(arena_bits=8, steps=32),
+            target_weight=4,
+            w_max=8,
+        )
+        self.assertEqual(report["audit_parameters"]["target_weight"], 4)
+        self.assertEqual(report["audit_parameters"]["w_max"], 8)
 
 
 class TestConcentrationReportDisplay(unittest.TestCase):

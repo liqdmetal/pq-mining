@@ -56,7 +56,7 @@ cd C:/Users/officeone/pq-mining
 python -m pytest tests/ -q
 ```
 
-Latest verified local result: **141 passed, 8 subtests passed**.
+Latest verified local result: see the current `pytest` run; historical counts are not security evidence.
 
 The current restriction-audit record is `docs/RESTRICTION_AUDIT.md`; the
 current option-2 specification is `docs/POW_SPEC.md`.

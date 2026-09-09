@@ -2,11 +2,13 @@
 
 THE RISK, STATED PRECISELY
 --------------------------
-`latency_bound.py` accepts a share when the syndrome accumulated along a
-K-step walk equals the target. But the walk visits only addresses its own
-data-dependent chain produces, so the set of REACHABLE column multisets is
-a vanishing fraction of all weight-K supports. If that restricted set has
-exploitable structure, an attacker decodes faster than generic ISD and the
+The current audit uses the decoupled selector in `decoupled_trace.py`:
+terminates after a target number of selected columns, applies a selection
+threshold, and rehashes duplicate column selections. It is not the old
+all-steps `latency_bound.py` walk. The selector visits only addresses its own
+data-dependent chain produces, so the set of REACHABLE column supports is a
+vanishing fraction of all bounded supports. If that restricted set has
+exploitable structure, an attacker may decode faster than generic ISD and the
 "Classic McEliece assumption" claim collapses.
 
 This is the same failure mode as Esser-Santini (CRYPTO 2024) on REGULAR
@@ -380,9 +382,20 @@ def path_convergence(header: bytes, sdp: SDPParameters,
 
 def full_audit(header: bytes, sdp: SDPParameters,
                params: LatencyParameters,
-               target_weight: int | None = None) -> dict:
-    """Run all four attacks against the actual decoupled selector."""
-    target = sdp.weight if target_weight is None else target_weight
+               target_weight: int | None = None,
+               w_max: int | None = None) -> dict:
+    """Run all four attacks against the actual decoupled selector.
+
+    ``w_max`` is reported explicitly so a toy audit cannot be mistaken for a
+    verifier-parameter validation. The audit still measures the selector's
+    requested target; it is not a full security analysis of arbitrary supports.
+    """
+    cap = sdp.weight if w_max is None else w_max
+    if cap <= 0:
+        raise CodeBasedError("w_max must be positive")
+    target = cap if target_weight is None else target_weight
+    if target <= 0 or target > cap:
+        raise CodeBasedError("target_weight must lie in (0, w_max]")
     bias = column_bias(header, sdp, params, nonces=16,
                        target_weight=target)
     cycles = cycle_analysis(header, sdp, params, target_weight=target)
@@ -408,6 +421,12 @@ def full_audit(header: bytes, sdp: SDPParameters,
         "cycles": cycles.summary(),
         "concentration": concentration.summary(),
         "convergence": convergence.summary(),
+        "audit_parameters": {
+            "target_weight": target,
+            "w_max": cap,
+            "steps": params.steps,
+            "arena_bits": params.arena_bits,
+        },
         "failures": failures,
         "passed": not failures,
         "caveat": (

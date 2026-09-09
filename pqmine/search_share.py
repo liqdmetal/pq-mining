@@ -26,6 +26,7 @@ from .verifier import (
     Share,
     Verdict,
     derive_instance,
+    syndrome_mask,
     verify_share,
 )
 
@@ -84,9 +85,7 @@ def _search_nonce(
     if trace.weight > pow_params.w_max:
         return None, trace.weight
 
-    total_bits = 64 * ((pow_params.syndrome_bits + 63) // 64)
-    mask = (1 << pow_params.matched_bits) - 1
-    mask <<= total_bits - pow_params.matched_bits
+    mask = syndrome_mask(pow_params)
     if trace.selected_columns and (trace.syndrome & mask) == (target & mask):
         share = Share(header, nonce, tuple(sorted(trace.selected_columns)))
         verdict = verify_share(share, pow_params)
