@@ -119,11 +119,16 @@ meet-in-the-middle calculation in `pqmine/bounded_work.py`:
 - satisfiability: `log2(E[accepted supports]) = 5.0086`;
 - simple MITM attack: **83.06 bits of work**, using two lists of weight 16;
 - memory for the larger list: **2^83.06 entries** before implementation
-  compression and representation costs.
+  compression and representation costs;
+- walk-restricted nonce scan: **173.434 conditional bits** in a 256-nonce
+  sample, with 148/256 supports under `w_max`; this is weaker than the generic
+  route and assumes a uniform matched-prefix target.
 
-This is an **attack upper bound on security**, not a security claim. A better
-bounded-weight or structured-support attack may be faster. No certified
-security level is assigned until a coding theorist reviews the model.
+The generic MITM number remains an **attack upper bound on security**, not a
+security claim. The walk estimate is only a conditional workload model because
+the verifier accepts arbitrary bounded supports. A better bounded-weight,
+partial-syndrome, quantum, or structured-support attack may be faster. No
+certified security level is assigned until a coding theorist reviews the model.
 
 ## 6. Hardware profile — measured, not asserted
 
