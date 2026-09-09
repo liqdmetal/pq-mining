@@ -8,7 +8,7 @@ have been catastrophic: pad a weight-2 solution to weight-6 for free.
 import unittest
 
 from pqmine.verifier import (
-    PoWParams, Share, ShareError, derive_columns, derive_target,
+    PoWParams, Share, ShareError, derive_columns, derive_instance, derive_target,
     expected_work_log2, verify_share,
 )
 
@@ -78,6 +78,14 @@ class VerifierRuleTests(unittest.TestCase):
         v = verify_share(moved, self.params)
         self.assertFalse(v.valid)
         self.assertIn("syndrome", v.reason)
+
+    def test_derive_instance_matches_components_and_nonce_changes(self):
+        cols, target = derive_instance(self.header, self.params, 0)
+        self.assertEqual(cols, derive_columns(self.header, self.params, 0))
+        self.assertEqual(target, derive_target(self.header, self.params, 0))
+        cols_next, target_next = derive_instance(self.header, self.params, 1)
+        self.assertNotEqual(cols, cols_next)
+        self.assertNotEqual(target, target_next)
 
     def test_nonce_is_bound_in_the_instance(self):
         a = derive_columns(self.header, self.params, 0)

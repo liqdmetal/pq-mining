@@ -101,6 +101,15 @@ def derive_target(header: bytes, params: PoWParams, nonce: int = 0) -> int:
     )
 
 
+def derive_instance(header: bytes, params: PoWParams, nonce: int = 0) -> tuple[tuple[int, ...], int]:
+    """Return the complete consensus instance ``(H, s)`` for one nonce.
+
+    Keeping the two derivations behind one named helper prevents miners,
+    audits, and tools from silently binding different fields or domains.
+    """
+    return derive_columns(header, params, nonce), derive_target(header, params, nonce)
+
+
 def _mask(params: PoWParams) -> int:
     """Top matched_bits of the syndrome. Difficulty = how many must match."""
     total = 64 * ((params.syndrome_bits + 63) // 64)
@@ -157,6 +166,7 @@ __all__ = [
     "ShareError",
     "Verdict",
     "derive_columns",
+    "derive_instance",
     "derive_target",
     "expected_work_log2",
     "verify_share",

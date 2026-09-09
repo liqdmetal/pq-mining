@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from .codebased import CodeBasedError, SDPParameters
 from .decoupled_trace import trace_decoupled_walk
 from .latency_bound import LatencyParameters, build_arena
-from .verifier import PoWParams, derive_columns as derive_v2_columns
+from .verifier import PoWParams, derive_instance
 
 
 def _v2_columns(header: bytes, sdp: SDPParameters, nonce: int) -> tuple:
@@ -66,7 +66,8 @@ def _v2_columns(header: bytes, sdp: SDPParameters, nonce: int) -> tuple:
         w_max=max(sdp.weight, 1),
         matched_bits=sdp.syndrome_bits,
     )
-    return derive_v2_columns(header, params, nonce)
+    columns, _target = derive_instance(header, params, nonce)
+    return columns
 
 
 @dataclass(frozen=True)

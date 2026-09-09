@@ -25,8 +25,7 @@ from .verifier import (
     PoWParams,
     Share,
     Verdict,
-    derive_columns,
-    derive_target,
+    derive_instance,
     verify_share,
 )
 
@@ -75,8 +74,7 @@ def _search_nonce(
     if not (0 < target_weight <= latency_params.steps):
         raise SearchShareError("target_weight must lie in (0, steps]")
 
-    columns = derive_columns(header, pow_params, nonce)
-    target = derive_target(header, pow_params, nonce)
+    columns, target = derive_instance(header, pow_params, nonce)
     trace = trace_decoupled_walk(
         build_arena(header, latency_params), nonce, latency_params,
         columns, target_weight,
