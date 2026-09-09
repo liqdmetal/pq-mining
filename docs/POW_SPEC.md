@@ -7,16 +7,26 @@ from `pqmine/` and its tests.
 ## 1. What this is
 
 A proof-of-work whose puzzle is a **bounded-weight syndrome decoding**
-instance derived from the block header:
+instance derived from the block header **and the nonce**:
 
 > Find a set `e` of at most `w_max` distinct column indices of a
-> header-derived parity-check matrix `H` such that the XOR of those
-> columns matches a header-derived syndrome `s` on its top `t` bits.
+> **(header, nonce)-derived** parity-check matrix `H` such that the XOR of
+> those columns matches a **(header, nonce)-derived** syndrome `s` on its top
+> `t` bits.
 
 Syndrome decoding is the hardness assumption behind **Classic McEliece**
-(NIST PQC) and has been unbroken since 1978 (Berlekamp–McEliece–van Tilborg;
-NP-complete). The PoW is therefore **post-quantum in the strict sense**:
-its hardness assumption is itself a PQ assumption, not merely a hash.
+(NIST PQC) and has been studied since 1978 (Berlekamp–McEliece–van Tilborg;
+NP-complete). This research construction uses that code-based assumption as
+its intended PQ hardness basis; it does **not** certify that the composed,
+walk-restricted construction inherits generic SDP security.
+
+## 1b. What is verified, what is not
+
+The **verifier** is the only consensus-critical piece. It independently
+recomputes `H` and `s` from the bound instance and checks only the
+distinct, bounded-support XOR relation. The **search** (the K-step walk) is
+not re-executed; a share is a witness, not a transcript. A miner may use any
+search implementation; only §4 is consensus.
 
 ## 2. What it is NOT — read this first
 

@@ -52,9 +52,21 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 
-from .codebased import CodeBasedError, SDPParameters, derive_columns
+from .codebased import CodeBasedError, SDPParameters
 from .decoupled_trace import trace_decoupled_walk
 from .latency_bound import LatencyParameters, build_arena
+from .verifier import PoWParams, derive_columns as derive_v2_columns
+
+
+def _v2_columns(header: bytes, sdp: SDPParameters, nonce: int) -> tuple:
+    """Derive the exact consensus columns for one header/nonce."""
+    params = PoWParams(
+        n_columns=sdp.n,
+        syndrome_bits=sdp.syndrome_bits,
+        w_max=max(sdp.weight, 1),
+        matched_bits=sdp.syndrome_bits,
+    )
+    return derive_v2_columns(header, params, nonce)
 
 
 @dataclass(frozen=True)
@@ -96,14 +108,14 @@ class BiasReport:
 def column_bias(header: bytes, sdp: SDPParameters,
                 params: LatencyParameters, nonces: int = 64,
                 target_weight: int | None = None) -> BiasReport:
-    """Chi-square test on columns selected by the decoupled search trace."""
+    """Chi-square test on columns selected by the v2 decoupled trace."""
     if nonces <= 0:
         raise CodeBasedError("nonces must be positive")
     target = sdp.weight if target_weight is None else target_weight
-    columns = derive_columns(header, sdp)
     counts = Counter()
 
     for nonce in range(nonces):
+        columns = _v2_columns(header, sdp, nonce)
         arena = build_arena(header, params)
         result = trace_decoupled_walk(
             arena, nonce, params, columns, target,
@@ -189,7 +201,7 @@ def cycle_analysis(header: bytes, sdp: SDPParameters,
                    target_weight: int | None = None) -> CycleReport:
     """Measure address revisits and selected-column parity in the decoupled trace."""
     target = sdp.weight if target_weight is None else target_weight
-    columns = derive_columns(header, sdp)
+    columns = _v2_columns(header, sdp, nonce)
     arena = build_arena(header, params)
     result = trace_decoupled_walk(arena, nonce, params, columns, target)
 
@@ -275,9 +287,9 @@ def syndrome_concentration(header: bytes, sdp: SDPParameters,
                            target_weight: int | None = None) -> ConcentrationReport:
     """Sample decoupled-walk syndromes across nonces."""
     target = sdp.weight if target_weight is None else target_weight
-    columns = derive_columns(header, sdp)
     syndromes = Counter()
     for nonce in range(nonces):
+        columns = _v2_columns(header, sdp, nonce)
         arena = build_arena(header, params)
         result = trace_decoupled_walk(
             arena, nonce, params, columns, target,
@@ -329,9 +341,9 @@ def path_convergence(header: bytes, sdp: SDPParameters,
                      target_weight: int | None = None) -> ConvergenceReport:
     """Compare decoupled walk paths pairwise for shared suffixes."""
     target = sdp.weight if target_weight is None else target_weight
-    columns = derive_columns(header, sdp)
     paths = []
     for nonce in range(nonces):
+        columns = _v2_columns(header, sdp, nonce)
         arena = build_arena(header, params)
         trace = trace_decoupled_walk(
             arena, nonce, params, columns, target,
