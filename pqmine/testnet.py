@@ -162,6 +162,13 @@ def _header_bytes(header: BlockHeader, params: ChainParams) -> bytes:
     return params.network.encode("ascii") + b"\x00" + header.canonical_bytes()
 
 
+def block_work(block: Block) -> int:
+    """Return deterministic integer work for one accepted PoW block."""
+    if block.header.height == 0:
+        return 0
+    return 1 << block.header.matched_bits
+
+
 def make_genesis(params: ChainParams, miner_id: str = "genesis") -> Block:
     """Create the deterministic height-zero anchor; genesis has no PoW share."""
     return Block(
@@ -430,6 +437,29 @@ class Chain:
             tip = self._blocks[tip.header.previous_hash]
         return list(reversed(reverse))
 
+    def _chain_work(self, tip: Block) -> int:
+        total = 0
+        cursor = tip
+        while cursor.header.height > 0:
+            total += block_work(cursor)
+            cursor = self._blocks[cursor.header.previous_hash]
+        return total
+
+    @property
+    def work(self) -> int:
+        """Cumulative work of the selected best chain."""
+        with self._lock:
+            return self._chain_work(self._blocks[self._best_tip_id])
+
+    def _selection_key(self, block: Block) -> tuple[int, int, str]:
+        return self._chain_work(block), block.header.height, block.block_id
+
+    def _reselect_tip(self) -> None:
+        self._best_tip_id = max(
+            self._blocks,
+            key=lambda block_id: self._selection_key(self._blocks[block_id]),
+        )
+
     @property
     def blocks(self) -> list[Block]:
         with self._lock:
@@ -524,11 +554,7 @@ class Chain:
                     block, parent, self.params, self._blocks):
                 return False
             self._blocks[block.block_id] = block
-            current = self._blocks[self._best_tip_id]
-            candidate_key = (block.header.height, block.block_id)
-            current_key = (current.header.height, current.block_id)
-            if candidate_key > current_key:
-                self._best_tip_id = block.block_id
+            self._reselect_tip()
             return True
 
 

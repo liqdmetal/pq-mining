@@ -110,6 +110,29 @@ class TestnetConsensusTests(unittest.TestCase):
         self.assertTrue(self.chain.add_block(right))
         self.assertEqual(self.chain.tip.block_id, max(left.block_id, right.block_id))
 
+    def test_cumulative_work_beats_taller_lower_difficulty_branch(self):
+        params = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=8),
+            max_future_seconds=3600,
+            target_block_seconds=10,
+            retarget_interval=2,
+            max_retarget_step=4,
+        )
+        main = Chain(params)
+        first = mine_next_block(main, params, miner_id="main", max_nonces=128)
+        self.assertTrue(main.add_block(first))
+        low = Chain.from_blocks(params, [main.genesis])
+        low_one = mine_next_block(low, params, miner_id="low", max_nonces=128)
+        self.assertTrue(low.add_block(low_one))
+        low_two = mine_next_block(low, params, miner_id="low", max_nonces=128)
+        self.assertTrue(low.add_block(low_two))
+        low_three = mine_next_block(low, params, miner_id="low", max_nonces=128)
+        self.assertTrue(low.add_block(low_three))
+        self.assertTrue(main.add_block(low_one))
+        self.assertTrue(main.add_block(low_two))
+        self.assertTrue(main.add_block(low_three))
+        self.assertEqual(main.tip.block_id, low_three.block_id)
+
     def test_equal_height_tie_is_stable_after_persistence(self):
         left = mine_next_block(self.chain, self.params, miner_id="left", max_nonces=128)
         right = mine_next_block(
