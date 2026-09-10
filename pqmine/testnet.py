@@ -401,8 +401,19 @@ class LocalNode:
             if state_path is not None:
                 self.chain.save(state_path)
         self.peers: list[str] = []
+        self.auto_sync_interval: float | None = None
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._sync_thread: threading.Thread | None = None
+        self._sync_stop = threading.Event()
+        self._sync_lock = threading.Lock()
+        self.sync_attempts = 0
+        self.sync_successes = 0
+        self.last_sync_error: str | None = None
+
+    @property
+    def sync_running(self) -> bool:
+        return self._sync_thread is not None and self._sync_thread.is_alive()
 
     @property
     def url(self) -> str:
@@ -410,9 +421,13 @@ class LocalNode:
             raise TestnetError("node is not started")
         return f"http://127.0.0.1:{self._server.server_port}"
 
-    def start(self, *, port: int = 0) -> None:
+    def start(self, *, port: int = 0, auto_sync_interval: float | None = None) -> None:
         if self._server is not None:
             raise TestnetError("node already started")
+        if auto_sync_interval is not None and auto_sync_interval < 0.05:
+            raise TestnetError("auto_sync_interval must be at least 0.05 seconds")
+        self.auto_sync_interval = auto_sync_interval
+        self._sync_stop.clear()
         node = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -435,6 +450,12 @@ class LocalNode:
                         "height": node.chain.height,
                         "tip": node.chain.tip.block_id,
                         "miner_id": node.miner_id,
+                        "sync": {
+                            "running": node.sync_running,
+                            "attempts": node.sync_attempts,
+                            "successes": node.sync_successes,
+                            "last_error": node.last_sync_error,
+                        },
                     })
                 elif self.path == "/chain":
                     self._send(node.chain.to_dict())
@@ -474,8 +495,34 @@ class LocalNode:
             daemon=True,
         )
         self._thread.start()
+        if self.auto_sync_interval is not None:
+            self._sync_thread = threading.Thread(
+                target=self._sync_loop,
+                name=f"chitin-sync-{self.miner_id}",
+                daemon=True,
+            )
+            self._sync_thread.start()
+
+    def _sync_loop(self) -> None:
+        interval = self.auto_sync_interval or 1.0
+        while not self._sync_stop.wait(interval):
+            for peer in tuple(self.peers):
+                with self._sync_lock:
+                    self.sync_attempts += 1
+                try:
+                    if self.reconcile_peer(peer):
+                        with self._sync_lock:
+                            self.sync_successes += 1
+                            self.last_sync_error = None
+                except Exception as exc:  # defensive boundary for peer input
+                    with self._sync_lock:
+                        self.last_sync_error = str(exc)
 
     def stop(self) -> None:
+        self._sync_stop.set()
+        if self._sync_thread is not None:
+            self._sync_thread.join(timeout=2)
+            self._sync_thread = None
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()

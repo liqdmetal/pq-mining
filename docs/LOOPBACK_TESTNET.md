@@ -59,6 +59,19 @@ http://127.0.0.1:49613/chain
 `--peer` is restricted to `http://127.0.0.1:<port>` by the launcher. No
 external bind or peer URL is accepted.
 
+## Automatic peer reconciliation
+
+The node API supports a bounded background sync loop:
+
+```python
+node.start(port=0, auto_sync_interval=0.5)
+node.peers = [peer_url]
+```
+
+The interval cannot be set below 50 ms. `/status` reports `running`, `attempts`,
+`successes`, and `last_error` under `sync`. Shutdown stops and joins the sync
+worker before closing the HTTP server.
+
 The launcher uses toy parameters:
 
 ```text

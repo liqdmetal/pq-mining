@@ -3,6 +3,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -303,6 +304,21 @@ class TestnetNodeTests(unittest.TestCase):
         source.mine_and_broadcast(max_nonces=128)
         self.assertEqual(target.chain.height, 0)
         self.assertTrue(target.reconcile_peer(source.url))
+        self.assertEqual(target.chain.tip.block_id, source.chain.tip.block_id)
+
+    def test_automatic_peer_sync_recovers_missed_blocks(self):
+        source = LocalNode(self.params, "source")
+        target = LocalNode(self.params, "target")
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0, auto_sync_interval=0.05)
+        target.peers = [source.url]
+        source.mine_and_broadcast(max_nonces=128)
+        source.mine_and_broadcast(max_nonces=128)
+        deadline = time.time() + 3
+        while time.time() < deadline and target.chain.height < source.chain.height:
+            time.sleep(0.05)
+        self.assertEqual(target.chain.height, source.chain.height)
         self.assertEqual(target.chain.tip.block_id, source.chain.tip.block_id)
 
 
