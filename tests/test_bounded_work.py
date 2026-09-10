@@ -3,9 +3,11 @@
 import unittest
 
 from pqmine.bounded_work import (
+    certify_mitm_attack,
     log2_expected_bounded_solutions,
     max_matched_bits_bounded,
     mitm_attack_work,
+    verify_mitm_certificate,
 )
 
 
@@ -48,6 +50,31 @@ class BoundedLanguageTests(unittest.TestCase):
     def test_bounded_cap_rejects_negative_surplus(self):
         with self.assertRaises(ValueError):
             max_matched_bits_bounded(64, 16, 8, surplus_bits=-1.0)
+
+    def test_mitm_certificate_verifies_full_parameter_sweep(self):
+        certificate = certify_mitm_attack(32, 32, 4, 8)
+        self.assertTrue(verify_mitm_certificate(certificate))
+        self.assertEqual(certificate.split_count, 31)
+        self.assertEqual(certificate.weight_count, 4)
+        self.assertEqual(certificate.summary()["verified"], True)
+
+    def test_mitm_certificate_detects_tampering(self):
+        from dataclasses import replace
+
+        certificate = certify_mitm_attack(32, 32, 4, 8)
+        tampered_attack = replace(
+            certificate.attack,
+            split_index=certificate.attack.split_index + 1,
+        )
+        tampered = replace(certificate, attack=tampered_attack)
+        self.assertFalse(verify_mitm_certificate(tampered))
+
+    def test_large_parameter_certificate_has_explicit_coverage(self):
+        certificate = certify_mitm_attack(512, 256, 32, 164)
+        self.assertTrue(verify_mitm_certificate(certificate))
+        self.assertEqual(certificate.split_count, 511)
+        self.assertEqual(certificate.weight_count, 32)
+        self.assertAlmostEqual(certificate.attack.work_bits, 82.4461, places=3)
 
 
 if __name__ == "__main__":

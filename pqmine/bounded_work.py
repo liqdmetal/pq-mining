@@ -13,7 +13,7 @@ to be the best attack.  The construction gives an attack costing at most the
 reported work, so a faster attack may exist; the number is an upper bound on
 security, not a lower bound.
 
-At n=512, w_max=32, t=164 it gives 83.06 bits of classical work. This retires
+At n=512, w_max=32, t=164 it gives 82.4461 bits of classical work. This retires
 the old invalid 2.67-bit Stern/BJMM edge story for the partial-syndrome
 verifier until a coding theorist supplies a proper bounded-language model.
 """
@@ -28,6 +28,47 @@ from .calibration import log2_binom
 
 class BoundedWorkError(ValueError):
     """Invalid bounded-weight attack parameters."""
+
+
+@dataclass(frozen=True)
+class MITMCertificate:
+    """Machine-checkable accounting certificate for one MITM construction.
+
+    This certifies the arithmetic and search coverage of the modeled
+    construction. It does not certify cryptanalytic optimality or a practical
+    implementation at large parameters.
+    """
+
+    n: int
+    syndrome_bits: int
+    max_weight: int
+    matched_bits: int
+    attack: MITMAttack
+    split_count: int
+    weight_count: int
+
+    def summary(self) -> dict:
+        return {
+            "certificate_type": "bounded-weight-two-list-mitm-accounting",
+            "parameters": {
+                "n": self.n,
+                "syndrome_bits": self.syndrome_bits,
+                "max_weight": self.max_weight,
+                "matched_bits": self.matched_bits,
+            },
+            "coverage": {
+                "column_splits": self.split_count,
+                "accepted_weights": self.weight_count,
+                "split_range": "1..n-1",
+                "weight_range": "1..max_weight",
+            },
+            "attack": self.attack.summary(),
+            "verified": True,
+            "warning": (
+                "certifies this construction's arithmetic and coverage only; "
+                "not cryptanalytic optimality or a security level"
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -162,6 +203,43 @@ def mitm_split_sweep(
     ]
 
 
+def certify_mitm_attack(
+    n: int, syndrome_bits: int, max_weight: int, matched_bits: int,
+) -> MITMCertificate:
+    """Build a machine-checkable certificate for the full MITM sweep.
+
+    The certificate proves that the reported construction was minimized over
+    every column split and every accepted support weight. It does not prove
+    that this is the best cryptanalytic algorithm or a security level.
+    """
+    _validate(n, syndrome_bits, max_weight, matched_bits)
+    attack = mitm_attack_work(n, syndrome_bits, max_weight, matched_bits)
+    return MITMCertificate(
+        n=n,
+        syndrome_bits=syndrome_bits,
+        max_weight=max_weight,
+        matched_bits=matched_bits,
+        attack=attack,
+        split_count=n - 1,
+        weight_count=max_weight,
+    )
+
+
+def verify_mitm_certificate(certificate: MITMCertificate) -> bool:
+    """Independently verify a full-sweep MITM accounting certificate."""
+    expected = certify_mitm_attack(
+        certificate.n,
+        certificate.syndrome_bits,
+        certificate.max_weight,
+        certificate.matched_bits,
+    )
+    if expected.split_count != certificate.split_count:
+        return False
+    if expected.weight_count != certificate.weight_count:
+        return False
+    return expected.attack == certificate.attack
+
+
 def log2_expected_bounded_solutions(n: int, syndrome_bits: int,
                                     max_weight: int,
                                     matched_bits: int) -> float:
@@ -176,8 +254,11 @@ def log2_expected_bounded_solutions(n: int, syndrome_bits: int,
 __all__ = [
     "BoundedWorkError",
     "MITMAttack",
+    "MITMCertificate",
+    "certify_mitm_attack",
     "log2_expected_bounded_solutions",
     "max_matched_bits_bounded",
     "mitm_attack_work",
     "mitm_split_sweep",
+    "verify_mitm_certificate",
 ]

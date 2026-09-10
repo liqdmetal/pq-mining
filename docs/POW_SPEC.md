@@ -126,7 +126,12 @@ meet-in-the-middle calculation in `pqmine/bounded_work.py`:
   route and assumes a uniform matched-prefix target.
 
 The generic MITM number remains an **attack upper bound on security**, not a
-security claim. The walk estimate is only a conditional workload model because
+security claim. The repository now emits a machine-checkable accounting
+certificate for this construction: all `511` column splits and all `32`
+accepted support weights are swept, and the winning fields are independently
+recomputed. That certificate validates arithmetic and coverage only; it does
+not certify cryptanalytic optimality, practical large-parameter execution, or a
+security level. The walk estimate is only a conditional workload model because
 the verifier accepts arbitrary bounded supports. A better bounded-weight,
 partial-syndrome, quantum, or structured-support attack may be faster. No
 certified security level is assigned until a coding theorist reviews the model.
