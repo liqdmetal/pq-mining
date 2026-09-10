@@ -169,6 +169,31 @@ def block_work(block: Block) -> int:
     return 1 << block.header.matched_bits
 
 
+def cumulative_work(block: Block, blocks: dict[str, Block]) -> int:
+    """Return cumulative work from genesis through ``block``."""
+    total = 0
+    cursor = block
+    while cursor.header.height > 0:
+        total += block_work(cursor)
+        parent = blocks.get(cursor.header.previous_hash)
+        if parent is None:
+            raise TestnetError("missing parent while calculating chain work")
+        cursor = parent
+    return total
+
+
+def select_tip(blocks: dict[str, Block]) -> Block:
+    """Select a deterministic best tip using cumulative work."""
+    if not blocks:
+        raise TestnetError("cannot select a tip from an empty block graph")
+    return max(
+        blocks.values(),
+        key=lambda block: (
+            cumulative_work(block, blocks), block.header.height, block.block_id,
+        ),
+    )
+
+
 def make_genesis(params: ChainParams, miner_id: str = "genesis") -> Block:
     """Create the deterministic height-zero anchor; genesis has no PoW share."""
     return Block(
@@ -400,10 +425,9 @@ class Chain:
     """Branch-aware in-memory chain for the isolated PoC.
 
     Every valid block whose parent is known is retained. The exposed ``blocks``
-    view is the deterministic best chain: greatest height first, then greatest
-    block id on equal-height ties. This is cumulative-work selection for the
-    current fixed-work toy profile; it must be replaced by per-block work before
-    any production discussion.
+    view is the deterministic best chain selected by cumulative work, then
+    height, then block ID. Work is still a research-only integer model and is
+    not production difficulty calibration.
     """
 
     def __init__(self, params: ChainParams, miner_id: str = "genesis") -> None:
@@ -445,12 +469,7 @@ class Chain:
         return list(reversed(reverse))
 
     def _chain_work(self, tip: Block) -> int:
-        total = 0
-        cursor = tip
-        while cursor.header.height > 0:
-            total += block_work(cursor)
-            cursor = self._blocks[cursor.header.previous_hash]
-        return total
+        return cumulative_work(tip, self._blocks)
 
     @property
     def work(self) -> int:
@@ -458,14 +477,8 @@ class Chain:
         with self._lock:
             return self._chain_work(self._blocks[self._best_tip_id])
 
-    def _selection_key(self, block: Block) -> tuple[int, int, str]:
-        return self._chain_work(block), block.header.height, block.block_id
-
     def _reselect_tip(self) -> None:
-        self._best_tip_id = max(
-            self._blocks,
-            key=lambda block_id: self._selection_key(self._blocks[block_id]),
-        )
+        self._best_tip_id = select_tip(self._blocks).block_id
 
     @property
     def blocks(self) -> list[Block]:
@@ -819,18 +832,7 @@ class LocalNode:
                     progressed = True
                 if not progressed:
                     return False
-            def selection_key(block: Block) -> tuple[int, int, str]:
-                total = 0
-                cursor = block
-                while cursor.header.height > 0:
-                    total += block_work(cursor)
-                    parent = known.get(cursor.header.previous_hash)
-                    if parent is None:
-                        raise TestnetError("missing parent while selecting tip")
-                    cursor = parent
-                return total, block.header.height, block.block_id
-
-            candidate = max(known.values(), key=selection_key)
+            candidate = select_tip(known)
             changed = candidate.block_id != best or len(known) != len(self.chain._blocks)
             self.chain._blocks = known
             self.chain._best_tip_id = candidate.block_id
@@ -870,6 +872,9 @@ __all__ = [
     "NETWORK_NAME",
     "TestnetError",
     "make_genesis",
+    "block_work",
+    "cumulative_work",
+    "select_tip",
     "mine_next_block",
     "validate_block",
     "validate_chain",

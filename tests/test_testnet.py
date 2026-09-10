@@ -41,7 +41,12 @@ class TestnetConsensusTests(unittest.TestCase):
 
     def test_wrong_nonce_replay_is_rejected(self):
         block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
-        replay = Block(block.header, block.nonce + 1, block.support)
+        for nonce in range(block.nonce + 1, block.nonce + 129):
+            replay = Block(block.header, nonce, block.support)
+            if not validate_block(replay, self.chain.tip, self.params):
+                break
+        else:
+            self.fail("bounded nonce search found no invalid replay")
         self.assertFalse(validate_block(replay, self.chain.tip, self.params))
 
     def test_duplicate_support_is_rejected(self):
@@ -540,6 +545,50 @@ class TestnetNodeTests(unittest.TestCase):
         self.assertTrue(result["accepted"])
         self.assertEqual(target.chain.tip.block_id, second.block_id)
         self.assertEqual(target.chain.work, source.chain.work)
+
+    def test_http_sync_selects_high_work_branch_from_full_graph(self):
+        params = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=8),
+            max_future_seconds=3600,
+            target_block_seconds=10,
+            retarget_interval=2,
+            max_retarget_step=4,
+        )
+        high = Chain(params)
+        high_blocks = []
+        for timestamp in (10, 30, 50, 70):
+            block = mine_next_block(
+                high, params, miner_id="high", max_nonces=128, timestamp=timestamp,
+            )
+            self.assertTrue(high.add_block(block))
+            high_blocks.append(block)
+        low = Chain(params)
+        low_blocks = []
+        for timestamp in (10, 100, 101, 200, 300):
+            block = mine_next_block(
+                low, params, miner_id="low", max_nonces=128, timestamp=timestamp,
+            )
+            self.assertTrue(low.add_block(block))
+            low_blocks.append(block)
+        self.assertGreater(high.work, low.work)
+        for block in low_blocks:
+            self.assertTrue(high.add_block(block))
+
+        source = LocalNode(params, "source")
+        target = LocalNode(params, "target")
+        source.chain = high
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0)
+        payload = json.dumps(high.to_dict(include_all=True)).encode()
+        with urlopen(Request(
+            target.url + "/sync", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        ), timeout=2) as response:
+            result = json.loads(response.read())
+        self.assertTrue(result["accepted"])
+        self.assertEqual(target.chain.tip.block_id, high_blocks[-1].block_id)
+        self.assertEqual(target.chain.work, high.work)
 
     def test_http_sync_rejects_wrong_profile(self):
         node = LocalNode(self.params, "alice")
