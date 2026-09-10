@@ -40,6 +40,14 @@ class MITMExecutionResult:
     capped: bool
     peak_index_entries: int = 0
     chunks_processed: int = 0
+    left_candidates_processed: int = 0
+    right_candidates_processed: int = 0
+
+    @property
+    def candidate_work_log2(self) -> float:
+        if self.candidates_enumerated <= 0:
+            return float("-inf")
+        return math.log2(self.candidates_enumerated)
 
     @property
     def found(self) -> bool:
@@ -53,6 +61,9 @@ class MITMExecutionResult:
             "capped": self.capped,
             "peak_index_entries": self.peak_index_entries,
             "chunks_processed": self.chunks_processed,
+            "left_candidates_processed": self.left_candidates_processed,
+            "right_candidates_processed": self.right_candidates_processed,
+            "candidate_work_log2": round(self.candidate_work_log2, 3),
             "warning": (
                 "toy/reference execution only; capped results are inconclusive"
             ),
@@ -215,6 +226,8 @@ def execute_mitm_instance(
     left_supports = itertools.combinations(left, attack.left_weight)
     right_supports = itertools.combinations(right, attack.right_weight)
     chunk_limit = index_chunk_entries or max_candidates
+    left_processed = 0
+    right_processed = 0
     while True:
         left_map: dict[int, tuple[int, ...]] = {}
         left_chunk = list(itertools.islice(left_supports, chunk_limit))
@@ -224,25 +237,39 @@ def execute_mitm_instance(
         peak_entries = max(peak_entries, len(left_chunk))
         for support in left_chunk:
             if checked >= max_candidates:
-                return MITMExecutionResult(None, checked, True, peak_entries, chunks)
+                return MITMExecutionResult(
+                    None, checked, True, peak_entries, chunks,
+                    left_processed, right_processed,
+                )
             accumulator = 0
             for index in support:
                 accumulator ^= columns[index]
             left_map.setdefault(accumulator & mask, support)
             checked += 1
+            left_processed += 1
         for support in right_supports:
             if checked >= max_candidates:
-                return MITMExecutionResult(None, checked, True, peak_entries, chunks)
+                return MITMExecutionResult(
+                    None, checked, True, peak_entries, chunks,
+                    left_processed, right_processed,
+                )
             accumulator = 0
             for index in support:
                 accumulator ^= columns[index]
             needed = target_prefix ^ (accumulator & mask)
             candidate = left_map.get(needed)
             checked += 1
+            right_processed += 1
             if candidate is not None:
-                return MITMExecutionResult(candidate + support, checked, False, peak_entries, chunks)
+                return MITMExecutionResult(
+                    candidate + support, checked, False, peak_entries, chunks,
+                    left_processed, right_processed,
+                )
         right_supports = itertools.combinations(right, attack.right_weight)
-    return MITMExecutionResult(None, checked, False, peak_entries, chunks)
+    return MITMExecutionResult(
+        None, checked, False, peak_entries, chunks,
+        left_processed, right_processed,
+    )
 
 
 def mitm_attack_work(

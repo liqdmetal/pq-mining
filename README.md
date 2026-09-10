@@ -87,7 +87,7 @@ current option-2 specification is `docs/POW_SPEC.md`.
 - production difficulty calibration beyond the research-only timestamp-window controller;
 - independent coding-theory review of the bounded-language cap and work model;
 - executable toy cross-check of partition enumeration against the canonical verifier;
-- machine-checkable two-list certificate covers all `511` splits × `32` accepted weights, pins the winning fields, and has a chunked CPU executor with explicit inconclusive status and accounting-tamper rejection;
+- machine-checkable two-list certificate covers all `511` splits × `32` accepted weights, pins the winning fields, and has a chunked CPU executor with explicit inconclusive status, peak-memory telemetry, and accounting-tamper rejection;
 - exact two-list bound regression is now checked against every column split;
 - broader timestamp-manipulation analysis and cross-implementation review;
 - cross-branch timestamp-grinding analysis beyond the current bounded testnet harness;

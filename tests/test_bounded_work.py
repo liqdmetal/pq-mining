@@ -218,6 +218,9 @@ class BoundedLanguageTests(unittest.TestCase):
         self.assertEqual(result.peak_index_entries, 2)
         self.assertEqual(result.chunks_processed, 4)
         self.assertEqual(result.candidates_enumerated, 40)
+        self.assertEqual(result.left_candidates_processed, 8)
+        self.assertEqual(result.right_candidates_processed, 32)
+        self.assertAlmostEqual(result.candidate_work_log2, 5.321928, places=5)
 
     def test_chunk_size_must_be_positive(self):
         certificate = certify_mitm_attack(16, 8, 4, 3)
