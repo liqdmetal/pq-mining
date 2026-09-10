@@ -45,6 +45,7 @@ class ChainParams:
     target_block_seconds: int = 60
     retarget_interval: int = 2016
     max_retarget_step: int = 4
+    median_time_window: int = 11
 
     def __post_init__(self) -> None:
         if self.target_block_seconds <= 0:
@@ -53,6 +54,8 @@ class ChainParams:
             raise TestnetError("retarget_interval must be positive")
         if self.max_retarget_step <= 0:
             raise TestnetError("max_retarget_step must be positive")
+        if self.median_time_window <= 0 or self.median_time_window % 2 == 0:
+            raise TestnetError("median_time_window must be a positive odd integer")
         if not (0 < self.pow.matched_bits <= self.pow.syndrome_bits):
             raise TestnetError("initial matched_bits outside syndrome range")
 
@@ -67,6 +70,7 @@ class ChainParams:
             "target_block_seconds": self.target_block_seconds,
             "retarget_interval": self.retarget_interval,
             "max_retarget_step": self.max_retarget_step,
+            "median_time_window": self.median_time_window,
         }
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -222,6 +226,23 @@ def _expected_for_parent(
     )
 
 
+def median_time_past(
+    previous: Block,
+    params: ChainParams,
+    blocks: dict[str, Block],
+) -> int:
+    """Return the upper median of the validated recent ancestor timestamps."""
+    timestamps: list[int] = []
+    cursor = previous
+    for _ in range(params.median_time_window):
+        timestamps.append(cursor.header.timestamp)
+        if cursor.header.height == 0:
+            break
+        cursor = blocks[cursor.header.previous_hash]
+    timestamps.sort()
+    return timestamps[len(timestamps) // 2]
+
+
 def validate_block(
     block: Block,
     previous: Block,
@@ -229,6 +250,7 @@ def validate_block(
     *,
     now: int | None = None,
     difficulty_override: int | None = None,
+    validation_blocks: dict[str, Block] | None = None,
 ) -> bool:
     """Validate linkage, serialization fields, difficulty, and nonce-bound PoW."""
     try:
@@ -252,7 +274,8 @@ def validate_block(
             return False
         if not header.miner_id or len(header.miner_id) > 128:
             return False
-        if not (previous.header.timestamp <= header.timestamp):
+        blocks_for_time = validation_blocks or {previous.block_id: previous}
+        if header.timestamp <= median_time_past(previous, params, blocks_for_time):
             return False
         current = int(time.time()) if now is None else now
         if header.timestamp > current + params.max_future_seconds:
@@ -297,7 +320,13 @@ def _validate_block_in_chain(
 ) -> bool:
     """Validate one block with ancestry-aware difficulty."""
     expected = _expected_for_parent(previous, params, blocks)
-    return validate_block(block, previous, params, difficulty_override=expected)
+    return validate_block(
+        block,
+        previous,
+        params,
+        difficulty_override=expected,
+        validation_blocks=blocks,
+    )
 
 
 def mine_next_block(
@@ -313,10 +342,11 @@ def mine_next_block(
         raise TestnetError("max_nonces must be positive")
     previous = chain.tip
     stamp = int(time.time()) if timestamp is None else timestamp
-    if stamp < previous.header.timestamp:
-        stamp = previous.header.timestamp
-        if timestamp is not None and timestamp < previous.header.timestamp:
-            raise TestnetError("timestamp must not precede parent")
+    if stamp <= previous.header.timestamp:
+        if timestamp is None:
+            stamp = previous.header.timestamp + 1
+        else:
+            raise TestnetError("timestamp must exceed parent")
     header = BlockHeader(
         version=1,
         height=previous.header.height + 1,

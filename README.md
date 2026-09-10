@@ -85,6 +85,7 @@ current option-2 specification is `docs/POW_SPEC.md`.
 - reproducible cross-hardware measurements with the resident Qwen workload
   protected;
 - production difficulty calibration beyond the research-only timestamp-window controller;
+- broader timestamp-manipulation analysis and cross-implementation review;
 - serialization, pool/share protocol, and network design;
 - independent implementation, parser/security review, and external
   cryptanalysis.

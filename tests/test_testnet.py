@@ -181,6 +181,7 @@ class DifficultyConsensusTests(unittest.TestCase):
             target_block_seconds=10,
             retarget_interval=2,
             max_retarget_step=4,
+            median_time_window=3,
         )
 
     def test_header_commits_initial_difficulty(self):
@@ -262,6 +263,74 @@ class DifficultyConsensusTests(unittest.TestCase):
             support=(),
         )
         self.assertFalse(chain.add_block(second))
+
+    def test_timestamp_must_exceed_parent_time(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = Block(
+            BlockHeader(
+                version=1,
+                height=2,
+                previous_hash=chain.tip.block_id,
+                timestamp=10,
+                miner_id="alice",
+                matched_bits=self.params.pow.matched_bits,
+                profile_id=self.params.profile_id,
+            ),
+            nonce=0,
+            support=(),
+        )
+        self.assertFalse(chain.add_block(second))
+
+    def test_timestamp_above_parent_time_is_accepted(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        candidate = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=11,
+        )
+        self.assertGreater(candidate.header.timestamp, first.header.timestamp)
+
+    def test_median_time_past_rejects_stale_timestamp(self):
+        chain = Chain(self.params)
+        for timestamp in (10, 20, 30):
+            block = mine_next_block(
+                chain, self.params, miner_id="alice", max_nonces=128,
+                timestamp=timestamp,
+            )
+            self.assertTrue(chain.add_block(block))
+        candidate = Block(
+            BlockHeader(
+                version=1,
+                height=4,
+                previous_hash=chain.tip.block_id,
+                timestamp=20,
+                miner_id="alice",
+                matched_bits=chain.tip.header.matched_bits,
+                profile_id=self.params.profile_id,
+            ),
+            nonce=0,
+            support=(),
+        )
+        self.assertFalse(chain.add_block(candidate))
+
+    def test_median_time_past_allows_timestamp_above_recent_median(self):
+        chain = Chain(self.params)
+        for timestamp in (10, 20, 30):
+            block = mine_next_block(
+                chain, self.params, miner_id="alice", max_nonces=128,
+                timestamp=timestamp,
+            )
+            self.assertTrue(chain.add_block(block))
+        candidate = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=31,
+        )
+        self.assertGreater(candidate.header.timestamp, 30)
 
     def test_wrong_retargeted_difficulty_is_rejected(self):
         chain = Chain(self.params)
