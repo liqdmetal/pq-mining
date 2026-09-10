@@ -51,6 +51,19 @@ does not claim ASIC-proof, FPGA-proof, CPU-only, or equal CPU/GPU mining.
 - `pqmine/partial_isd.py`: bounded CPU reference partial-syndrome solver; toy-validated, not a production solver.
 - `pqmine/bdd_attack.py`: symbolic multi-partition attack family; not a complete BDD/ISD implementation.
 - `pqmine/verifier.py`: consensus-rule reference implementation.
+- `pqmine/testnet.py`: loopback-only block/chain/node PoC; not DERO or production.
+
+## Loopback testnet PoC
+
+Run the isolated two-node toy chain:
+
+```text
+python tools/run_loopback_testnet.py --blocks 3 --max-nonces 128 --matched-bits 8
+```
+
+It binds only to `127.0.0.1`, uses toy parameters, mines with the bounded CPU
+reference solver, and exercises real block validation plus HTTP broadcast. See
+`docs/LOOPBACK_TESTNET.md`. It is not a DERO testnet and proves no PQ security.
 
 ## Verification
 
