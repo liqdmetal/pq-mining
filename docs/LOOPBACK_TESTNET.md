@@ -13,6 +13,7 @@ consensus, and does not claim post-quantum security.
 - JSON block transport;
 - two loopback HTTP nodes and block broadcast;
 - profile IDs bound into genesis and every header;
+- ancestry-bound timestamp-window difficulty control;
 - branch-aware chain selection and deterministic reorganization;
 - persistence of all known branches with restart validation;
 - `/sync` import for recovering a missed chain;

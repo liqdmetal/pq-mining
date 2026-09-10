@@ -84,7 +84,8 @@ current option-2 specification is `docs/POW_SPEC.md`.
 - an actual optimized miner producing verifier-compatible supports;
 - reproducible cross-hardware measurements with the resident Qwen workload
   protected;
-- difficulty control, serialization, pool/share protocol, and network design;
+- production difficulty calibration beyond the research-only timestamp-window controller;
+- serialization, pool/share protocol, and network design;
 - independent implementation, parser/security review, and external
   cryptanalysis.
 

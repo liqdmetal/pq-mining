@@ -205,12 +205,63 @@ class DifficultyConsensusTests(unittest.TestCase):
         third = mine_next_block(
             chain, self.params, miner_id="alice", max_nonces=128, timestamp=6,
         )
-        self.assertEqual(third.header.matched_bits, 7)
+        self.assertEqual(third.header.matched_bits, 9)
         self.assertTrue(chain.add_block(third))
         fourth = mine_next_block(
             chain, self.params, miner_id="alice", max_nonces=128, timestamp=8,
         )
-        self.assertEqual(fourth.header.matched_bits, 7)
+        self.assertEqual(fourth.header.matched_bits, 9)
+
+    def test_fast_window_increases_difficulty(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=1,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=2,
+        )
+        self.assertTrue(chain.add_block(second))
+        third = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=3,
+        )
+        self.assertEqual(third.header.matched_bits, 9)
+
+    def test_target_window_holds_difficulty(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=30,
+        )
+        self.assertTrue(chain.add_block(second))
+        third = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=50,
+        )
+        self.assertEqual(third.header.matched_bits, 8)
+
+    def test_non_monotonic_timestamp_is_rejected(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = Block(
+            BlockHeader(
+                version=1,
+                height=2,
+                previous_hash=chain.tip.block_id,
+                timestamp=9,
+                miner_id="alice",
+                matched_bits=self.params.pow.matched_bits,
+                profile_id=self.params.profile_id,
+            ),
+            nonce=0,
+            support=(),
+        )
+        self.assertFalse(chain.add_block(second))
 
     def test_wrong_retargeted_difficulty_is_rejected(self):
         chain = Chain(self.params)

@@ -167,22 +167,59 @@ def make_genesis(params: ChainParams, miner_id: str = "genesis") -> Block:
     )
 
 
-def expected_matched_bits(previous: Block, params: ChainParams) -> int:
-    """Return the consensus difficulty for the child of ``previous``.
+def expected_matched_bits(
+    previous: Block,
+    params: ChainParams,
+    *,
+    window_start_timestamp: int | None = None,
+) -> int:
+    """Return consensus difficulty using the completed timestamp window.
 
-    This PoC uses a deterministic one-bit retarget at each completed window.
-    A production controller must replace this with a timestamp-window formula
-    and retain the full window in consensus state.
+    A retarget is evaluated only at a window boundary. The caller must provide
+    the timestamp of the first block in that validated window; silently using
+    the parent timestamp would make the result miner-controlled.
     """
     current = previous.header.matched_bits or params.pow.matched_bits
     if previous.header.height == 0:
         return current
-    if previous.header.height % params.retarget_interval == 0:
-        # Research-only deterministic controller: one fixed step at a
-        # completed window. Timestamp-window retargeting is a separate
-        # consensus task and must not be implied by this PoC.
-        return max(1, min(params.pow.syndrome_bits, current - min(1, params.max_retarget_step)))
-    return current
+    if previous.header.height % params.retarget_interval != 0:
+        return current
+    if window_start_timestamp is None:
+        raise TestnetError("difficulty window ancestry required")
+    target = params.target_block_seconds * params.retarget_interval
+    elapsed = previous.header.timestamp - window_start_timestamp
+    delta = 1 if elapsed < target else -1 if elapsed > target else 0
+    delta = max(-params.max_retarget_step, min(params.max_retarget_step, delta))
+    return max(1, min(params.pow.syndrome_bits, current + delta))
+
+
+def _window_start_timestamp(
+    previous: Block,
+    params: ChainParams,
+    blocks: dict[str, Block],
+) -> int | None:
+    """Find the first timestamp in the completed retarget window."""
+    if previous.header.height == 0:
+        return None
+    if previous.header.height % params.retarget_interval != 0:
+        return None
+    target_height = previous.header.height - params.retarget_interval + 1
+    cursor = previous
+    while cursor.header.height > target_height:
+        cursor = blocks[cursor.header.previous_hash]
+    return cursor.header.timestamp
+
+
+def _expected_for_parent(
+    previous: Block,
+    params: ChainParams,
+    blocks: dict[str, Block],
+) -> int:
+    return expected_matched_bits(
+        previous,
+        params,
+        window_start_timestamp=_window_start_timestamp(previous, params, blocks),
+    )
 
 
 def validate_block(
@@ -191,6 +228,7 @@ def validate_block(
     params: ChainParams,
     *,
     now: int | None = None,
+    difficulty_override: int | None = None,
 ) -> bool:
     """Validate linkage, serialization fields, difficulty, and nonce-bound PoW."""
     try:
@@ -205,7 +243,12 @@ def validate_block(
             return False
         if header.previous_hash != previous.block_id:
             return False
-        if header.matched_bits != expected_matched_bits(previous, params):
+        expected_bits = (
+            difficulty_override
+            if difficulty_override is not None
+            else expected_matched_bits(previous, params)
+        )
+        if header.matched_bits != expected_bits:
             return False
         if not header.miner_id or len(header.miner_id) > 128:
             return False
@@ -237,10 +280,24 @@ def validate_chain(blocks: Iterable[Block], params: ChainParams) -> bool:
     sequence = list(blocks)
     if not sequence or sequence[0] != make_genesis(params, sequence[0].header.miner_id):
         return False
+    known = {sequence[0].block_id: sequence[0]}
     for previous, block in zip(sequence, sequence[1:]):
-        if not validate_block(block, previous, params):
+        expected = _expected_for_parent(previous, params, known)
+        if not validate_block(block, previous, params, difficulty_override=expected):
             return False
+        known[block.block_id] = block
     return True
+
+
+def _validate_block_in_chain(
+    block: Block,
+    previous: Block,
+    params: ChainParams,
+    blocks: dict[str, Block],
+) -> bool:
+    """Validate one block with ancestry-aware difficulty."""
+    expected = _expected_for_parent(previous, params, blocks)
+    return validate_block(block, previous, params, difficulty_override=expected)
 
 
 def mine_next_block(
@@ -258,13 +315,15 @@ def mine_next_block(
     stamp = int(time.time()) if timestamp is None else timestamp
     if stamp < previous.header.timestamp:
         stamp = previous.header.timestamp
+        if timestamp is not None and timestamp < previous.header.timestamp:
+            raise TestnetError("timestamp must not precede parent")
     header = BlockHeader(
         version=1,
         height=previous.header.height + 1,
         previous_hash=previous.block_id,
         timestamp=stamp,
         miner_id=miner_id,
-        matched_bits=expected_matched_bits(previous, params),
+        matched_bits=_expected_for_parent(previous, params, chain._blocks),
         profile_id=params.profile_id,
     )
     header_bytes = _header_bytes(header, params)
@@ -287,7 +346,8 @@ def mine_next_block(
         result = solve_partial_mitm(columns, target, attack_params)
         if result.found:
             block = Block(header, nonce, tuple(sorted(result.support or ())))
-            if validate_block(block, previous, params):
+            if _validate_block_in_chain(
+                    block, previous, params, chain._blocks):
                 return block
     raise TestnetError("bounded miner exhausted max_nonces")
 
@@ -430,7 +490,8 @@ class Chain:
             if block.block_id in self._blocks:
                 return False
             parent = self._blocks.get(block.header.previous_hash)
-            if parent is None or not validate_block(block, parent, self.params):
+            if parent is None or not _validate_block_in_chain(
+                    block, parent, self.params, self._blocks):
                 return False
             self._blocks[block.block_id] = block
             current = self._blocks[self._best_tip_id]
@@ -687,7 +748,8 @@ class LocalNode:
                 progressed = False
                 for block_id, block in list(pending.items()):
                     parent = known.get(block.header.previous_hash)
-                    if parent is None or not validate_block(block, parent, self.params):
+                    if parent is None or not _validate_block_in_chain(
+                            block, parent, self.params, known):
                         continue
                     known[block_id] = block
                     del pending[block_id]
