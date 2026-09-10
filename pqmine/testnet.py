@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Iterable
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from .partial_isd import PartialISDParams, solve_partial_mitm
@@ -32,6 +33,8 @@ ZERO_HASH = "00" * 32
 class TestnetError(ValueError):
     """Malformed testnet object or invalid consensus transition."""
 
+    __test__ = False
+
 
 @dataclass(frozen=True)
 class ChainParams:
@@ -39,6 +42,19 @@ class ChainParams:
     max_future_seconds: int = 120
     network: str = NETWORK_NAME
     max_payload_bytes: int = 64 * 1024
+    target_block_seconds: int = 60
+    retarget_interval: int = 2016
+    max_retarget_step: int = 4
+
+    def __post_init__(self) -> None:
+        if self.target_block_seconds <= 0:
+            raise TestnetError("target_block_seconds must be positive")
+        if self.retarget_interval <= 0:
+            raise TestnetError("retarget_interval must be positive")
+        if self.max_retarget_step <= 0:
+            raise TestnetError("max_retarget_step must be positive")
+        if not (0 < self.pow.matched_bits <= self.pow.syndrome_bits):
+            raise TestnetError("initial matched_bits outside syndrome range")
 
     @property
     def profile_id(self) -> str:
@@ -48,6 +64,9 @@ class ChainParams:
             "syndrome_bits": self.pow.syndrome_bits,
             "w_max": self.pow.w_max,
             "matched_bits": self.pow.matched_bits,
+            "target_block_seconds": self.target_block_seconds,
+            "retarget_interval": self.retarget_interval,
+            "max_retarget_step": self.max_retarget_step,
         }
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -62,6 +81,7 @@ class BlockHeader:
     previous_hash: str
     timestamp: int
     miner_id: str
+    matched_bits: int = 0
     profile_id: str = ""
 
     def to_dict(self) -> dict:
@@ -71,6 +91,7 @@ class BlockHeader:
             "previous_hash": self.previous_hash,
             "timestamp": self.timestamp,
             "miner_id": self.miner_id,
+            "matched_bits": self.matched_bits,
             "profile_id": self.profile_id,
         }
 
@@ -82,6 +103,7 @@ class BlockHeader:
             previous_hash=str(value["previous_hash"]),
             timestamp=int(value["timestamp"]),
             miner_id=str(value["miner_id"]),
+            matched_bits=int(value.get("matched_bits", 0)),
             profile_id=str(value.get("profile_id", "")),
         )
 
@@ -139,10 +161,32 @@ def _header_bytes(header: BlockHeader, params: ChainParams) -> bytes:
 def make_genesis(params: ChainParams, miner_id: str = "genesis") -> Block:
     """Create the deterministic height-zero anchor; genesis has no PoW share."""
     return Block(
-        header=BlockHeader(1, 0, ZERO_HASH, 0, miner_id, params.profile_id),
+        header=BlockHeader(1, 0, ZERO_HASH, 0, miner_id, params.pow.matched_bits, params.profile_id),
         nonce=0,
         support=(),
     )
+
+
+def expected_matched_bits(previous: Block, params: ChainParams) -> int:
+    """Return the consensus difficulty for the child of ``previous``.
+
+    This PoC uses a deterministic one-bit retarget at each completed window.
+    A production controller must replace this with a timestamp-window formula
+    and retain the full window in consensus state.
+    """
+    current = previous.header.matched_bits or params.pow.matched_bits
+    if previous.header.height == 0:
+        return current
+    if previous.header.height % params.retarget_interval == 0:
+        # Research-only deterministic controller: apply the configured
+        # one-window reduction. Timestamp-window retargeting is a separate
+        # consensus task and must not be implied by this PoC.
+        return max(1, min(params.pow.syndrome_bits, current - params.max_retarget_step))
+    if previous.header.height % params.retarget_interval == 1 and current < params.pow.matched_bits:
+        # Small hysteresis keeps the toy controller from pinning difficulty
+        # forever after a window transition. This is not production economics.
+        return min(params.pow.matched_bits, current + 1)
+    return current
 
 
 def validate_block(
@@ -152,7 +196,7 @@ def validate_block(
     *,
     now: int | None = None,
 ) -> bool:
-    """Validate linkage, serialization fields, timestamp, and nonce-bound PoW."""
+    """Validate linkage, serialization fields, difficulty, and nonce-bound PoW."""
     try:
         header = block.header
         if header.version != 1:
@@ -165,6 +209,8 @@ def validate_block(
             return False
         if header.previous_hash != previous.block_id:
             return False
+        if header.matched_bits != expected_matched_bits(previous, params):
+            return False
         if not header.miner_id or len(header.miner_id) > 128:
             return False
         if not (previous.header.timestamp <= header.timestamp):
@@ -176,10 +222,16 @@ def validate_block(
             return False
         if tuple(sorted(block.support)) != block.support:
             return False
+        pow_params = PoWParams(
+            n_columns=params.pow.n_columns,
+            syndrome_bits=params.pow.syndrome_bits,
+            w_max=params.pow.w_max,
+            matched_bits=header.matched_bits,
+        )
         share = Share(
             _header_bytes(header, params), block.nonce, tuple(block.support),
         )
-        return verify_share(share, params.pow).valid
+        return verify_share(share, pow_params).valid
     except (TypeError, ValueError, OverflowError):
         return False
 
@@ -216,20 +268,26 @@ def mine_next_block(
         previous_hash=previous.block_id,
         timestamp=stamp,
         miner_id=miner_id,
+        matched_bits=expected_matched_bits(previous, params),
         profile_id=params.profile_id,
     )
     header_bytes = _header_bytes(header, params)
+    pow_params = PoWParams(
+        n_columns=params.pow.n_columns,
+        syndrome_bits=params.pow.syndrome_bits,
+        w_max=params.pow.w_max,
+        matched_bits=header.matched_bits,
+    )
     attack_params = PartialISDParams(
         syndrome_bits=params.pow.syndrome_bits,
-        matched_bits=params.pow.matched_bits,
+        matched_bits=header.matched_bits,
         max_weight=params.pow.w_max,
         max_candidates=max_nonces,
     )
-    columns, target = derive_instance(header_bytes, params.pow, 0)
     # The PoW nonce is searched as the instance-binding nonce. Rebuild columns
     # for each nonce; this keeps the block rule identical to verify_share().
     for nonce in range(min(max_nonces, 2**64)):
-        columns, target = derive_instance(header_bytes, params.pow, nonce)
+        columns, target = derive_instance(header_bytes, pow_params, nonce)
         result = solve_partial_mitm(columns, target, attack_params)
         if result.found:
             block = Block(header, nonce, tuple(sorted(result.support or ())))
@@ -400,7 +458,13 @@ class LocalNode:
             self.chain = Chain(params, miner_id="genesis")
             if state_path is not None:
                 self.chain.save(state_path)
+        self.max_peers = 8
+        self.max_sync_bytes = 64 * 1024
         self.peers: list[str] = []
+        self._peer_failures: dict[str, int] = {}
+        self._peer_retry_at: dict[str, float] = {}
+        self.peer_backoff_base = 0.5
+        self.peer_backoff_max = 30.0
         self.auto_sync_interval: float | None = None
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -409,11 +473,38 @@ class LocalNode:
         self._sync_lock = threading.Lock()
         self.sync_attempts = 0
         self.sync_successes = 0
+        self.sync_backoff_skips = 0
         self.last_sync_error: str | None = None
 
     @property
     def sync_running(self) -> bool:
         return self._sync_thread is not None and self._sync_thread.is_alive()
+
+    def add_peer(self, peer_url: str) -> None:
+        parsed = urlparse(peer_url)
+        if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port:
+            raise TestnetError("peer must be an http://127.0.0.1:<port> URL")
+        normalized = peer_url.rstrip("/")
+        if normalized in self.peers:
+            return
+        if len(self.peers) >= self.max_peers:
+            raise TestnetError("peer limit reached")
+        self.peers.append(normalized)
+
+    def _peer_backoff(self, peer_url: str) -> float:
+        failures = self._peer_failures.get(peer_url, 0)
+        return min(self.peer_backoff_max, self.peer_backoff_base * (2 ** max(0, failures - 1)))
+
+    def _peer_failed(self, peer_url: str, error: str) -> None:
+        failures = self._peer_failures.get(peer_url, 0) + 1
+        self._peer_failures[peer_url] = failures
+        self._peer_retry_at[peer_url] = time.monotonic() + self._peer_backoff(peer_url)
+        self.last_sync_error = error
+
+    def _peer_succeeded(self, peer_url: str) -> None:
+        self._peer_failures.pop(peer_url, None)
+        self._peer_retry_at.pop(peer_url, None)
+        self.last_sync_error = None
 
     @property
     def url(self) -> str:
@@ -436,6 +527,9 @@ class LocalNode:
 
             def _send(self, payload: dict, status: int = 200) -> None:
                 body = json.dumps(payload, sort_keys=True).encode("utf-8")
+                if len(body) > node.params.max_payload_bytes:
+                    body = b'{"error":"response too large"}'
+                    status = 413
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -454,6 +548,7 @@ class LocalNode:
                             "running": node.sync_running,
                             "attempts": node.sync_attempts,
                             "successes": node.sync_successes,
+                            "backoff_skips": node.sync_backoff_skips,
                             "last_error": node.last_sync_error,
                         },
                     })
@@ -507,16 +602,22 @@ class LocalNode:
         interval = self.auto_sync_interval or 1.0
         while not self._sync_stop.wait(interval):
             for peer in tuple(self.peers):
+                if time.monotonic() < self._peer_retry_at.get(peer, 0.0):
+                    with self._sync_lock:
+                        self.sync_backoff_skips += 1
+                    continue
                 with self._sync_lock:
                     self.sync_attempts += 1
                 try:
                     if self.reconcile_peer(peer):
                         with self._sync_lock:
                             self.sync_successes += 1
-                            self.last_sync_error = None
+                        self._peer_succeeded(peer)
+                    else:
+                        self._peer_failed(peer, "peer returned no import")
                 except Exception as exc:  # defensive boundary for peer input
                     with self._sync_lock:
-                        self.last_sync_error = str(exc)
+                        self._peer_failed(peer, str(exc))
 
     def stop(self) -> None:
         self._sync_stop.set()
@@ -538,13 +639,19 @@ class LocalNode:
         return accepted
 
     def reconcile_peer(self, peer_url: str) -> bool:
-        """Fetch and transactionally import a peer's advertised best chain."""
+        """Fetch and transactionally import a bounded peer chain."""
         request = Request(peer_url.rstrip("/") + "/chain", method="GET")
         try:
-            with urlopen(request, timeout=2) as response:
+            with urlopen(request, timeout=0.1) as response:
                 if response.status != 200:
                     return False
-                payload = json.loads(response.read())
+                length = int(response.headers.get("Content-Length", "0"))
+                if length > self.max_sync_bytes:
+                    return False
+                raw = response.read(self.max_sync_bytes + 1)
+                if len(raw) > self.max_sync_bytes:
+                    return False
+                payload = json.loads(raw)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return False
         accepted = self.receive_chain(payload)

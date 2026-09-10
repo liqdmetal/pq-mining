@@ -16,6 +16,7 @@ from pqmine.testnet import (
     Chain,
     ChainParams,
     LocalNode,
+    TestnetError,
     make_genesis,
     mine_next_block,
     validate_chain,
@@ -46,7 +47,7 @@ class TestnetConsensusTests(unittest.TestCase):
     def test_duplicate_support_is_rejected(self):
         header = BlockHeader(
             version=1, height=1, previous_hash=self.chain.tip.block_id,
-            timestamp=1, miner_id="alice",
+            timestamp=1, miner_id="alice", matched_bits=self.params.pow.matched_bits,
         )
         bad = Block(header, nonce=0, support=(1, 1))
         self.assertFalse(validate_block(bad, self.chain.tip, self.params))
@@ -56,7 +57,7 @@ class TestnetConsensusTests(unittest.TestCase):
         self.assertTrue(self.chain.add_block(block))
         wrong_header = BlockHeader(
             version=1, height=3, previous_hash="00" * 32,
-            timestamp=2, miner_id="alice",
+            timestamp=2, miner_id="alice", matched_bits=self.params.pow.matched_bits,
         )
         wrong = Block(wrong_header, nonce=0, support=(1,))
         self.assertFalse(self.chain.add_block(wrong))
@@ -137,6 +138,72 @@ class TestnetConsensusTests(unittest.TestCase):
         )
         block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
         self.assertFalse(Chain(other).add_block(block))
+
+
+class DifficultyConsensusTests(unittest.TestCase):
+
+    def setUp(self):
+        self.params = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=8),
+            max_future_seconds=3600,
+            target_block_seconds=10,
+            retarget_interval=2,
+            max_retarget_step=4,
+        )
+
+    def test_header_commits_initial_difficulty(self):
+        chain = Chain(self.params)
+        block = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=2,
+        )
+        self.assertEqual(block.header.matched_bits, 8)
+        self.assertTrue(chain.add_block(block))
+
+    def test_retarget_changes_difficulty_only_at_window_boundary(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=2,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=4,
+        )
+        self.assertEqual(second.header.matched_bits, 8)
+        self.assertTrue(chain.add_block(second))
+        third = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=6,
+        )
+        self.assertEqual(third.header.matched_bits, 4)
+        self.assertTrue(chain.add_block(third))
+        fourth = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=8,
+        )
+        self.assertEqual(fourth.header.matched_bits, 5)
+
+    def test_wrong_retargeted_difficulty_is_rejected(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=2,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=4,
+        )
+        self.assertTrue(chain.add_block(second))
+        expected = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=6,
+        )
+        forged_header = BlockHeader(
+            version=expected.header.version,
+            height=expected.header.height,
+            previous_hash=expected.header.previous_hash,
+            timestamp=expected.header.timestamp,
+            miner_id=expected.header.miner_id,
+            profile_id=expected.header.profile_id,
+            matched_bits=expected.header.matched_bits + 1,
+        )
+        forged = Block(forged_header, expected.nonce, expected.support)
+        self.assertFalse(chain.add_block(forged))
 
 
 class TestnetNodeTests(unittest.TestCase):
@@ -321,9 +388,31 @@ class TestnetNodeTests(unittest.TestCase):
         self.assertEqual(target.chain.height, source.chain.height)
         self.assertEqual(target.chain.tip.block_id, source.chain.tip.block_id)
 
+    def test_peer_limit_is_enforced(self):
+        node = LocalNode(self.params, "alice")
+        self.assertEqual(node.max_peers, 8)
+        for index in range(node.max_peers):
+            node.add_peer(f"http://127.0.0.1:{40000 + index}")
+        with self.assertRaises(TestnetError):
+            node.add_peer("http://127.0.0.1:49999")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_reconcile_rejects_oversized_peer_response(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        node.max_sync_bytes = 256
+        self.assertFalse(node.reconcile_peer(node.url))
+        self.assertEqual(node.chain.height, 0)
+
+    def test_dead_peer_backoff_prevents_hot_loop(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0, auto_sync_interval=0.05)
+        node.add_peer("http://127.0.0.1:9")
+        time.sleep(0.30)
+        status = json.loads(urlopen(node.url + "/status", timeout=2).read())
+        self.assertLessEqual(status["sync"]["attempts"], 3)
+        self.assertGreaterEqual(status["sync"]["backoff_skips"], 1)
 
 
 if __name__ == "__main__":

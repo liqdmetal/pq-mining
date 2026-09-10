@@ -68,9 +68,13 @@ node.start(port=0, auto_sync_interval=0.5)
 node.peers = [peer_url]
 ```
 
-The interval cannot be set below 50 ms. `/status` reports `running`, `attempts`,
-`successes`, and `last_error` under `sync`. Shutdown stops and joins the sync
-worker before closing the HTTP server.
+The interval cannot be set below 50 ms. Nodes accept at most eight normalized
+loopback peers. Chain imports and `/chain` responses are capped at 64 KiB by
+default; peer requests use a 100 ms timeout. Failed peers use exponential
+backoff (0.5 seconds up to 30 seconds) rather than a hot retry loop.
+`/status` reports `running`, `attempts`, `successes`, `backoff_skips`, and
+`last_error` under `sync`. Shutdown stops and joins the sync worker before
+closing the HTTP server.
 
 The launcher uses toy parameters:
 
