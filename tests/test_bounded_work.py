@@ -176,16 +176,28 @@ class BoundedLanguageTests(unittest.TestCase):
             )
 
     def test_executable_mitm_large_parameter_run_is_explicitly_capped(self):
+        params = PoWParams(
+            n_columns=512, syndrome_bits=256, w_max=32, matched_bits=164,
+        )
+        header = b"chitin-real-large-parameter-instance"
+        columns, target = derive_instance(header, params, nonce=19)
         certificate = certify_mitm_attack(512, 256, 32, 164)
-        columns = tuple(range(512))
         result = execute_mitm_instance(
-            columns, 0, 256, 164, 32, certificate.attack,
+            columns, target, 256, 164, 32, certificate.attack,
             max_candidates=1_000,
+            index_chunk_entries=32,
         )
         self.assertTrue(result.capped)
         self.assertFalse(result.found)
         self.assertEqual(result.summary()["capped"], True)
         self.assertIn("inconclusive", result.summary()["warning"])
+        self.assertEqual(result.peak_index_entries, 32)
+        self.assertEqual(result.left_candidates_processed, 32)
+        self.assertEqual(result.right_candidates_processed, 968)
+        self.assertEqual(result.candidates_enumerated, 1_000)
+        self.assertFalse(
+            verify_share(Share(header, 19, tuple(range(32))), params).valid,
+        )
 
     def test_chunked_mitm_never_exceeds_index_budget(self):
         params = PoWParams(n_columns=16, syndrome_bits=8, w_max=4, matched_bits=3)
