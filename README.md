@@ -86,7 +86,7 @@ current option-2 specification is `docs/POW_SPEC.md`.
   protected;
 - production difficulty calibration beyond the research-only timestamp-window controller;
 - broader timestamp-manipulation analysis and cross-implementation review;
-- cumulative-work network selection and adversarial timestamp/fork analysis;
+- cross-branch timestamp-grinding analysis beyond the current bounded testnet harness;
 - serialization, pool/share protocol, and network design;
 - independent implementation, parser/security review, and external
   cryptanalysis.

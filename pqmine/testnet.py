@@ -354,6 +354,8 @@ def mine_next_block(
             stamp = previous.header.timestamp + 1
         else:
             raise TestnetError("timestamp must exceed parent")
+    if timestamp is not None and stamp - previous.header.timestamp > params.max_future_seconds:
+        raise TestnetError("timestamp exceeds consensus step")
     header = BlockHeader(
         version=1,
         height=previous.header.height + 1,

@@ -351,6 +351,30 @@ class DifficultyConsensusTests(unittest.TestCase):
         )
         self.assertGreater(candidate.header.timestamp, first.header.timestamp)
 
+    def test_timestamp_grinding_beyond_consensus_step_is_rejected(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        with self.assertRaises(TestnetError):
+            mine_next_block(
+                chain, self.params, miner_id="alice", max_nonces=128,
+                timestamp=10 + self.params.max_future_seconds + 1,
+            )
+
+    def test_timestamp_step_boundary_is_accepted(self):
+        chain = Chain(self.params)
+        first = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=10,
+        )
+        self.assertTrue(chain.add_block(first))
+        second = mine_next_block(
+            chain, self.params, miner_id="alice", max_nonces=128, timestamp=50,
+        )
+        self.assertEqual(second.header.timestamp, 50)
+        self.assertTrue(chain.add_block(second))
+
     def test_median_time_past_rejects_stale_timestamp(self):
         chain = Chain(self.params)
         for timestamp in (10, 20, 30):
