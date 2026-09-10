@@ -93,7 +93,39 @@ class TestnetConsensusTests(unittest.TestCase):
         self.assertTrue(self.chain.add_block(side_one))
         self.assertTrue(self.chain.add_block(side_two))
         self.assertEqual(self.chain.tip.block_id, side_two.block_id)
-        self.assertEqual([b.block_id for b in self.chain.blocks], [self.chain.genesis.block_id, side_one.block_id, side_two.block_id])
+        self.assertEqual(
+            [b.block_id for b in self.chain.blocks],
+            [self.chain.genesis.block_id, side_one.block_id, side_two.block_id],
+        )
+
+    def test_equal_height_tie_uses_deterministic_block_id(self):
+        left = mine_next_block(self.chain, self.params, miner_id="left", max_nonces=128)
+        right = mine_next_block(
+            Chain.from_blocks(self.params, [self.chain.genesis]),
+            self.params,
+            miner_id="right",
+            max_nonces=128,
+        )
+        self.assertTrue(self.chain.add_block(left))
+        self.assertTrue(self.chain.add_block(right))
+        self.assertEqual(self.chain.tip.block_id, max(left.block_id, right.block_id))
+
+    def test_equal_height_tie_is_stable_after_persistence(self):
+        left = mine_next_block(self.chain, self.params, miner_id="left", max_nonces=128)
+        right = mine_next_block(
+            Chain.from_blocks(self.params, [self.chain.genesis]),
+            self.params,
+            miner_id="right",
+            max_nonces=128,
+        )
+        self.assertTrue(self.chain.add_block(left))
+        self.assertTrue(self.chain.add_block(right))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tie.json"
+            self.chain.save(path)
+            restored = Chain.load(path, self.params)
+        self.assertEqual(restored.tip.block_id, self.chain.tip.block_id)
+        self.assertEqual(restored.height, 1)
 
     def test_duplicate_block_is_rejected(self):
         block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
