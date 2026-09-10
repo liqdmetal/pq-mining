@@ -117,8 +117,9 @@ meet-in-the-middle calculation in `pqmine/bounded_work.py`:
 
 - `n=512`, `syndrome_bits=256`, `w_max=32`, `t=164`;
 - satisfiability: `log2(E[accepted supports]) = 5.0086`;
-- simple MITM attack: **83.06 bits of work**, using two lists of weight 16;
-- memory for the larger list: **2^83.06 entries** before implementation
+- simple MITM attack: **82.4461 bits of work**, using a `215/297` column split
+  and support weights `17/15`;
+- memory for the larger list: **2^82.4461 entries** before implementation
   compression and representation costs;
 - walk-restricted nonce scan: **173.434 conditional bits** in a 256-nonce
   sample, with 148/256 supports under `w_max`; this is weaker than the generic

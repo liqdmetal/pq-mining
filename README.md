@@ -86,6 +86,7 @@ current option-2 specification is `docs/POW_SPEC.md`.
   protected;
 - production difficulty calibration beyond the research-only timestamp-window controller;
 - independent coding-theory review of the bounded-language cap and work model;
+- exact two-list bound regression is now checked against every column split;
 - broader timestamp-manipulation analysis and cross-implementation review;
 - cross-branch timestamp-grinding analysis beyond the current bounded testnet harness;
 - serialization, pool/share protocol, and network design;

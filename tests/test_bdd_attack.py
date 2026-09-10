@@ -93,5 +93,38 @@ class MultiLevelModelTests(unittest.TestCase):
         self.assertGreaterEqual(work_multi, work_two)
         self.assertAlmostEqual(work_two, 82.4461, places=3)
 
+    def test_two_list_baseline_matches_full_split_sweep(self):
+        from pqmine.bounded_work import mitm_attack_work, mitm_split_sweep
+
+        baseline = mitm_attack_work(512, 256, 32, 164)
+        sweep = mitm_split_sweep(512, 256, 32, 164)
+        best_in_sweep = min(sweep, key=lambda attack: attack.work_bits)
+
+        self.assertAlmostEqual(
+            best_in_sweep.work_bits, baseline.work_bits, places=4,
+        )
+        self.assertEqual(best_in_sweep.split_index, baseline.split_index)
+
+    def test_winning_two_list_fields_match_closed_form(self):
+        from pqmine.bounded_work import log2_binom, mitm_attack_work
+
+        attack = mitm_attack_work(512, 256, 32, 164)
+        expected_left = log2_binom(attack.split_index, attack.left_weight)
+        expected_right = log2_binom(
+            512 - attack.split_index, attack.right_weight,
+        )
+        expected_work = max(
+            max(expected_left, expected_right),
+            164 - min(expected_left, expected_right),
+        )
+
+        self.assertAlmostEqual(attack.left_list_bits, expected_left)
+        self.assertAlmostEqual(attack.right_list_bits, expected_right)
+        self.assertAlmostEqual(attack.work_bits, expected_work)
+        self.assertAlmostEqual(
+            attack.expected_pair_excess_bits,
+            expected_left + expected_right - 164,
+        )
+
 if __name__ == "__main__":
     unittest.main()
