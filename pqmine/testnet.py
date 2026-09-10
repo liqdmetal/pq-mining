@@ -693,6 +693,8 @@ class LocalNode:
                     })
                 elif self.path == "/chain":
                     self._send(node.chain.to_dict())
+                elif self.path == "/graph":
+                    self._send(node.chain.to_dict(include_all=True))
                 else:
                     self._send({"error": "not found"}, 404)
 

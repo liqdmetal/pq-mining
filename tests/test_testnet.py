@@ -480,6 +480,24 @@ class TestnetNodeTests(unittest.TestCase):
         self.assertEqual(payload["height"], 0)
         self.assertEqual(payload["profile_id"], self.params.profile_id)
 
+    def test_http_graph_endpoint_exposes_all_known_branches(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        first = node.mine_and_broadcast(max_nonces=128)
+        side = mine_next_block(
+            Chain.from_blocks(self.params, [node.chain.genesis]),
+            self.params, miner_id="side", max_nonces=128,
+        )
+        self.assertTrue(node.chain.add_block(side))
+        payload = json.loads(urlopen(node.url + "/graph", timeout=2).read())
+        ids = {item["block_id"] for item in payload["blocks"]}
+        self.assertEqual(payload["network"], self.params.network)
+        self.assertIn(first.block_id, ids)
+        self.assertIn(side.block_id, ids)
+        self.assertEqual(len(ids), 3)
+        self.assertEqual(payload["tip"], node.chain.tip.block_id)
+
     def test_oversized_and_malformed_block_payloads_are_rejected(self):
         node = LocalNode(self.params, "alice")
         self.nodes = [node]

@@ -56,7 +56,12 @@ Inspect:
 ```text
 http://127.0.0.1:49613/status
 http://127.0.0.1:49613/chain
+http://127.0.0.1:49613/graph
 ```
+
+`/chain` returns the selected best branch. `/graph` returns every known valid
+branch plus the deterministic selected tip; it is intended for local fork and
+reorganization inspection.
 
 `--peer` is restricted to `http://127.0.0.1:<port>` by the launcher. No
 external bind or peer URL is accepted.
