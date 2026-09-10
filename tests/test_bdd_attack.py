@@ -126,5 +126,46 @@ class MultiLevelModelTests(unittest.TestCase):
             expected_left + expected_right - 164,
         )
 
+    def test_partition_enumerator_matches_verifier_on_toy_language(self):
+        from itertools import combinations
+
+        from pqmine.bdd_attack import enumerate_partition_supports
+        from pqmine.verifier import PoWParams, Share, verify_share
+
+        params = PoWParams(
+            n_columns=12, syndrome_bits=8, w_max=3, matched_bits=3,
+        )
+        header = b"bdd-to-verifier-toy"
+        partitioned = set(enumerate_partition_supports((4, 3, 5), 3))
+        brute_force = {
+            support
+            for weight in range(1, params.w_max + 1)
+            for support in combinations(range(params.n_columns), weight)
+        }
+
+        self.assertEqual(partitioned, brute_force)
+        accepted_partitioned = {
+            support for support in partitioned
+            if verify_share(Share(header, 0, support), params).valid
+        }
+        accepted_brute_force = {
+            support for support in brute_force
+            if verify_share(Share(header, 0, support), params).valid
+        }
+        self.assertEqual(accepted_partitioned, accepted_brute_force)
+        self.assertTrue(accepted_partitioned)
+
+    def test_partition_enumerator_rejects_malformed_partitions(self):
+        from pqmine.bdd_attack import enumerate_partition_supports
+
+        with self.assertRaises(AttackModelError):
+            list(enumerate_partition_supports((), 1))
+        with self.assertRaises(AttackModelError):
+            list(enumerate_partition_supports((4, 0, 5), 1))
+        with self.assertRaises(AttackModelError):
+            list(enumerate_partition_supports((4, 5), 0))
+        with self.assertRaises(AttackModelError):
+            list(enumerate_partition_supports((4, 5), 10))
+
 if __name__ == "__main__":
     unittest.main()

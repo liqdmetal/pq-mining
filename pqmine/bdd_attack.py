@@ -36,9 +36,10 @@ required before any security interpretation.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Iterator, Sequence
 
 from .bounded_work import log2_binom, mitm_attack_work
 from .codebased import SDPParameters
@@ -112,6 +113,58 @@ def _validate_shape(n: int, shape: AttackShape) -> None:
         raise AttackModelError(
             "target_weight cannot exceed total column count"
         )
+
+
+def enumerate_partition_supports(
+    columns_per_partition: Sequence[int],
+    max_weight: int,
+) -> Iterator[tuple[int, ...]]:
+    """Yield each distinct support of weight 1..``max_weight`` exactly once.
+
+    Partitions are contiguous column ranges. This executable helper is a toy
+    cross-check for the symbolic partition model; it is not a production
+    attack implementation.
+    """
+    sizes = tuple(columns_per_partition)
+    if not sizes or any(size <= 0 for size in sizes):
+        raise AttackModelError("partition sizes must be positive")
+    if not (0 < max_weight <= sum(sizes)):
+        raise AttackModelError("max_weight must be in (0, total columns]")
+    offsets = []
+    offset = 0
+    for size in sizes:
+        offsets.append(offset)
+        offset += size
+    for weight in range(1, max_weight + 1):
+        yield from _enumerate_partition_weight(sizes, offsets, 0, weight, ())
+
+
+def _enumerate_partition_weight(
+    sizes: tuple[int, ...],
+    offsets: list[int],
+    partition_index: int,
+    remaining: int,
+    support: tuple[int, ...],
+):
+    if partition_index == len(sizes):
+        if remaining == 0:
+            yield support
+        return
+    size = sizes[partition_index]
+    minimum = max(0, remaining - sum(sizes[partition_index + 1:]))
+    maximum = min(size, remaining)
+    for local_weight in range(minimum, maximum + 1):
+        local_supports = (
+            tuple(offsets[partition_index] + index for index in local)
+            for local in itertools.combinations(
+                range(size), local_weight,
+            )
+        )
+        for selected in local_supports:
+            yield from _enumerate_partition_weight(
+                sizes, offsets, partition_index + 1,
+                remaining - local_weight, support + selected,
+            )
 
 
 def _partition_bounds(
@@ -498,6 +551,7 @@ __all__ = [
     "AttackResult",
     "AttackShape",
     "best_multi_level_attack",
+    "enumerate_partition_supports",
     "compare_bounded_attack_family",
     "multi_level_attack_work",
     "shape_work",
