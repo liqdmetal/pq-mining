@@ -523,6 +523,24 @@ class TestnetNodeTests(unittest.TestCase):
         self.assertEqual(target.chain.tip.block_id, block.block_id)
         self.assertEqual(payload["height"], 1)
 
+    def test_http_sync_selects_cumulative_work_tip(self):
+        source = LocalNode(self.params, "source")
+        target = LocalNode(self.params, "target")
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0)
+        source.mine_and_broadcast(max_nonces=128)
+        second = source.mine_and_broadcast(max_nonces=128)
+        with urlopen(Request(
+            target.url + "/sync",
+            data=json.dumps(source.chain.to_dict()).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        ), timeout=2) as response:
+            result = json.loads(response.read())
+        self.assertTrue(result["accepted"])
+        self.assertEqual(target.chain.tip.block_id, second.block_id)
+        self.assertEqual(target.chain.work, source.chain.work)
+
     def test_http_sync_rejects_wrong_profile(self):
         node = LocalNode(self.params, "alice")
         self.nodes = [node]

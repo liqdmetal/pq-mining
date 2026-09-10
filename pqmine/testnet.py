@@ -284,6 +284,11 @@ def validate_block(
         blocks_for_time = validation_blocks or {previous.block_id: previous}
         if header.timestamp <= median_time_past(previous, params, blocks_for_time):
             return False
+        if (
+            previous.header.height > 0
+            and header.timestamp - previous.header.timestamp > params.max_future_seconds
+        ):
+            return False
         current = int(time.time()) if now is None else now
         if header.timestamp > current + params.max_future_seconds:
             return False
@@ -814,9 +819,18 @@ class LocalNode:
                     progressed = True
                 if not progressed:
                     return False
-            candidate = max(
-                known.values(), key=lambda block: (block.header.height, block.block_id)
-            )
+            def selection_key(block: Block) -> tuple[int, int, str]:
+                total = 0
+                cursor = block
+                while cursor.header.height > 0:
+                    total += block_work(cursor)
+                    parent = known.get(cursor.header.previous_hash)
+                    if parent is None:
+                        raise TestnetError("missing parent while selecting tip")
+                    cursor = parent
+                return total, block.header.height, block.block_id
+
+            candidate = max(known.values(), key=selection_key)
             changed = candidate.block_id != best or len(known) != len(self.chain._blocks)
             self.chain._blocks = known
             self.chain._best_tip_id = candidate.block_id
