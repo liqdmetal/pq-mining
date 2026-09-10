@@ -114,6 +114,21 @@ class TestnetConsensusTests(unittest.TestCase):
             self.assertEqual(restored.height, self.chain.height)
             self.assertEqual(restored.tip.block_id, self.chain.tip.block_id)
 
+    def test_persistence_keeps_side_branch(self):
+        first = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertTrue(self.chain.add_block(first))
+        side = mine_next_block(
+            Chain.from_blocks(self.params, [self.chain.genesis]),
+            self.params, miner_id="bob", max_nonces=128,
+        )
+        self.assertTrue(self.chain.add_block(side))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chain.json"
+            self.chain.save(path)
+            restored = Chain.load(path, self.params)
+            self.assertTrue(restored.has_block(first.block_id))
+            self.assertTrue(restored.has_block(side.block_id))
+
     def test_profile_mismatch_is_rejected(self):
         other = ChainParams(
             pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=7),
@@ -185,6 +200,58 @@ class TestnetNodeTests(unittest.TestCase):
         foreign = mine_next_block(Chain(other), other, miner_id="foreign", max_nonces=128)
         request = Request(
             node.url + "/block", data=json.dumps(foreign.to_dict()).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=2)
+        self.assertEqual(error.exception.code, 400)
+
+    def test_http_sync_imports_a_branch(self):
+        source = LocalNode(self.params, "source")
+        target = LocalNode(self.params, "target")
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0)
+        block = source.mine_and_broadcast(max_nonces=128)
+        # Target did not receive it; import the full source chain explicitly.
+        request = Request(
+            target.url + "/sync", data=json.dumps(source.chain.to_dict()).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read())
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(target.chain.tip.block_id, block.block_id)
+        self.assertEqual(payload["height"], 1)
+
+    def test_http_sync_rejects_wrong_profile(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        other = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=7),
+            max_future_seconds=3600,
+        )
+        foreign = LocalNode(other, "foreign")
+        foreign.start(port=0)
+        try:
+            request = Request(
+                node.url + "/sync", data=json.dumps(foreign.chain.to_dict()).encode(),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with self.assertRaises(HTTPError) as error:
+                urlopen(request, timeout=2)
+            self.assertEqual(error.exception.code, 400)
+        finally:
+            foreign.stop()
+
+    def test_http_sync_payload_limit_applies(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        payload = b"x" * (node.params.max_payload_bytes + 1)
+        request = Request(
+            node.url + "/sync", data=payload,
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with self.assertRaises(HTTPError) as error:

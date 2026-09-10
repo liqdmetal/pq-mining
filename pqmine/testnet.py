@@ -301,35 +301,59 @@ class Chain:
     def profile_id(self) -> str:
         return self.params.profile_id
 
+    def has_block(self, block_id: str) -> bool:
+        with self._lock:
+            return block_id in self._blocks
+
     def save(self, path) -> None:
-        """Persist the selected best chain as canonical JSON."""
-        payload = self.to_dict()
+        """Persist every known block and the selected tip as canonical JSON."""
+        with self._lock:
+            payload = self.to_dict(include_all=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
 
     @classmethod
     def load(cls, path, params: ChainParams) -> "Chain":
-        """Load and validate a persisted best chain."""
+        """Load and validate all persisted blocks and their selected tip."""
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
         if payload.get("network") != params.network:
             raise TestnetError("network mismatch")
         if payload.get("profile_id") != params.profile_id:
             raise TestnetError("profile mismatch")
-        blocks = [Block.from_dict(item) for item in payload.get("blocks", [])]
-        chain = cls.from_blocks(params, blocks)
+        raw_blocks = [Block.from_dict(item) for item in payload.get("blocks", [])]
+        if not raw_blocks:
+            raise TestnetError("persisted chain is empty")
+        genesis = make_genesis(params, raw_blocks[0].header.miner_id)
+        if raw_blocks[0] != genesis:
+            raise TestnetError("persisted genesis mismatch")
+        chain = cls(params, miner_id=raw_blocks[0].header.miner_id)
+        pending = {block.block_id: block for block in raw_blocks[1:]}
+        while pending:
+            progressed = False
+            for block_id, block in list(pending.items()):
+                if chain.add_block(block):
+                    del pending[block_id]
+                    progressed = True
+            if not progressed:
+                raise TestnetError("persisted chain contains invalid or orphaned blocks")
         if payload.get("tip") != chain.tip.block_id:
             raise TestnetError("persisted tip mismatch")
         return chain
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, include_all: bool = False) -> dict:
         with self._lock:
+            blocks = (
+                list(self._blocks.values())
+                if include_all else self._best_chain()
+            )
+            blocks.sort(key=lambda block: (block.header.height, block.block_id))
             return {
                 "network": self.params.network,
                 "profile_id": self.params.profile_id,
                 "height": self.height,
                 "tip": self.tip.block_id,
-                "blocks": [block.to_dict() for block in self._best_chain()],
+                "blocks": [block.to_dict() for block in blocks],
             }
 
     def add_block(self, block: Block) -> bool:
@@ -397,7 +421,7 @@ class LocalNode:
                     self._send({"error": "not found"}, 404)
 
             def do_POST(self) -> None:
-                if self.path != "/block":
+                if self.path not in ("/block", "/sync"):
                     self._send({"error": "not found"}, 404)
                     return
                 try:
@@ -407,9 +431,14 @@ class LocalNode:
                     body = self.rfile.read(length)
                     if len(body) != length:
                         raise TestnetError("truncated payload")
-                    block = Block.from_dict(json.loads(body))
-                    accepted = node.receive_block(block)
-                    self._send({"accepted": accepted}, 200 if accepted else 400)
+                    payload = json.loads(body)
+                    if self.path == "/sync":
+                        accepted = node.receive_chain(payload)
+                        self._send({"accepted": accepted, "height": node.chain.height}, 200 if accepted else 400)
+                    else:
+                        block = Block.from_dict(payload)
+                        accepted = node.receive_block(block)
+                        self._send({"accepted": accepted}, 200 if accepted else 400)
                 except (ValueError, TypeError, KeyError, TestnetError, json.JSONDecodeError) as exc:
                     self._send({"accepted": False, "error": str(exc)}, 400)
 
@@ -431,6 +460,34 @@ class LocalNode:
 
     def receive_block(self, block: Block) -> bool:
         return self.chain.add_block(block)
+
+    def receive_chain(self, payload: dict) -> bool:
+        """Import all blocks from a peer after profile and linkage checks."""
+        if payload.get("network") != self.params.network:
+            return False
+        if payload.get("profile_id") != self.params.profile_id:
+            return False
+        raw_blocks = payload.get("blocks")
+        if not isinstance(raw_blocks, list) or len(raw_blocks) > 10_000:
+            return False
+        try:
+            blocks = [Block.from_dict(item) for item in raw_blocks]
+        except (KeyError, TypeError, ValueError, TestnetError):
+            return False
+        if not blocks or blocks[0] != self.chain.genesis:
+            return False
+        accepted = False
+        pending = {block.block_id: block for block in blocks[1:]}
+        while pending:
+            progressed = False
+            for block_id, block in list(pending.items()):
+                if self.chain.add_block(block):
+                    del pending[block_id]
+                    progressed = True
+                    accepted = True
+            if not progressed:
+                return False
+        return accepted
 
     def mine_and_broadcast(self, *, max_nonces: int = 100_000) -> Block:
         block = mine_next_block(
