@@ -167,5 +167,65 @@ class MultiLevelModelTests(unittest.TestCase):
         with self.assertRaises(AttackModelError):
             list(enumerate_partition_supports((4, 5), 10))
 
+    def test_executable_partition_join_finds_verifier_share(self):
+        from pqmine.bdd_attack import execute_partition_shape
+        from pqmine.verifier import PoWParams, Share, derive_instance, verify_share
+
+        params = PoWParams(
+            n_columns=12, syndrome_bits=8, w_max=3, matched_bits=3,
+        )
+        header = b"bdd-join-toy"
+        columns, target = derive_instance(header, params, nonce=7)
+        shape = AttackShape((4, 3, 5), (4, 7, 12), 3, 3)
+        result = execute_partition_shape(
+            columns, target, shape, params.syndrome_bits, max_candidates=10_000,
+        )
+
+        self.assertTrue(result.found, result.summary())
+        self.assertGreaterEqual(len(result.support), 1)
+        self.assertLessEqual(len(result.support), shape.target_weight)
+        self.assertTrue(
+            verify_share(Share(header, 7, result.support), params).valid,
+        )
+        self.assertFalse(result.capped)
+
+    def test_executable_partition_join_reports_hard_cap(self):
+        from pqmine.bdd_attack import execute_partition_shape
+
+        shape = AttackShape((4, 3, 5), (4, 7, 12), 3, 3)
+        result = execute_partition_shape(
+            tuple(index << 56 for index in range(12)),
+            1 << 63,
+            shape,
+            8,
+            max_candidates=1,
+        )
+
+        self.assertTrue(result.capped)
+        self.assertIsNone(result.support)
+
+    def test_executable_join_rejects_invalid_prefix_width(self):
+        from pqmine.bdd_attack import execute_partition_shape
+
+        shape = AttackShape((4, 3, 5), (4, 7, 12), 3, 9)
+        with self.assertRaises(AttackModelError):
+            execute_partition_shape(tuple(range(12)), 0, shape, 8)
+
+    def test_executable_join_exhaustion_is_inconclusive_only_when_capped(self):
+        from pqmine.bdd_attack import execute_partition_shape
+
+        shape = AttackShape((4, 3, 5), (4, 7, 12), 1, 3)
+        result = execute_partition_shape(
+            tuple(index << 56 for index in range(12)),
+            1 << 63,
+            shape,
+            8,
+            max_candidates=100,
+        )
+
+        self.assertFalse(result.found)
+        self.assertFalse(result.capped)
+        self.assertEqual(result.candidates_enumerated, 12)
+
 if __name__ == "__main__":
     unittest.main()

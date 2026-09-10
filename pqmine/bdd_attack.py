@@ -167,6 +167,69 @@ def _enumerate_partition_weight(
             )
 
 
+@dataclass(frozen=True)
+class ExecutableJoinResult:
+    """Bounded toy execution result for one partition shape."""
+
+    support: tuple[int, ...] | None
+    candidates_enumerated: int
+    capped: bool
+
+    @property
+    def found(self) -> bool:
+        return self.support is not None
+
+    def summary(self) -> dict:
+        return {
+            "found": self.found,
+            "support": list(self.support) if self.support is not None else None,
+            "candidates_enumerated": self.candidates_enumerated,
+            "capped": self.capped,
+            "warning": "toy/reference execution only; not an attack certification",
+        }
+
+
+def execute_partition_shape(
+    columns: Sequence[int],
+    target: int,
+    shape: AttackShape,
+    syndrome_bits: int,
+    *,
+    max_candidates: int = 1_000_000,
+) -> ExecutableJoinResult:
+    """Execute bounded partition enumeration and verify prefix matches.
+
+    This is deliberately a small CPU reference path. It enumerates actual
+    supports, XORs their columns, applies the same high-order prefix rule as
+    the verifier, and stops at a hard candidate cap.
+    """
+    if len(columns) != sum(shape.columns_per_partition):
+        raise AttackModelError("columns must match partition sizes")
+    if not (0 < syndrome_bits <= 64 * 8):
+        raise AttackModelError("syndrome_bits must be positive")
+    if not (0 < shape.matched_bits <= syndrome_bits):
+        raise AttackModelError("matched_bits must be in (0, syndrome_bits]")
+    if max_candidates <= 0:
+        raise AttackModelError("max_candidates must be positive")
+    _validate_shape(len(columns), shape)
+    total_bits = 64 * ((syndrome_bits + 63) // 64)
+    mask = ((1 << shape.matched_bits) - 1) << (total_bits - shape.matched_bits)
+    target_prefix = target & mask
+    checked = 0
+    for support in enumerate_partition_supports(
+        shape.columns_per_partition, shape.target_weight,
+    ):
+        if checked >= max_candidates:
+            return ExecutableJoinResult(None, checked, True)
+        checked += 1
+        accumulator = 0
+        for index in support:
+            accumulator ^= columns[index]
+        if (accumulator & mask) == target_prefix:
+            return ExecutableJoinResult(support, checked, False)
+    return ExecutableJoinResult(None, checked, False)
+
+
 def _partition_bounds(
     columns_per_partition: tuple[int, ...],
     target_weight: int,
@@ -550,8 +613,10 @@ __all__ = [
     "AttackModelError",
     "AttackResult",
     "AttackShape",
+    "ExecutableJoinResult",
     "best_multi_level_attack",
     "enumerate_partition_supports",
+    "execute_partition_shape",
     "compare_bounded_attack_family",
     "multi_level_attack_work",
     "shape_work",
