@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -309,8 +311,21 @@ class Chain:
         """Persist every known block and the selected tip as canonical JSON."""
         with self._lock:
             payload = self.to_dict(include_all=True)
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        destination = os.fspath(path)
+        directory = os.path.dirname(os.path.abspath(destination)) or "."
+        fd, temporary = tempfile.mkstemp(prefix=".chain-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path, params: ChainParams) -> "Chain":
@@ -375,10 +390,16 @@ class Chain:
 class LocalNode:
     """Loopback-only HTTP node; no external bind is permitted."""
 
-    def __init__(self, params: ChainParams, miner_id: str) -> None:
+    def __init__(self, params: ChainParams, miner_id: str, state_path=None) -> None:
         self.params = params
         self.miner_id = miner_id
-        self.chain = Chain(params, miner_id="genesis")
+        self.state_path = state_path
+        if state_path is not None and os.path.exists(state_path):
+            self.chain = Chain.load(state_path, params)
+        else:
+            self.chain = Chain(params, miner_id="genesis")
+            if state_path is not None:
+                self.chain.save(state_path)
         self.peers: list[str] = []
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -427,6 +448,9 @@ class LocalNode:
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                     if length <= 0 or length > node.params.max_payload_bytes:
+                        if length > 0:
+                            self.rfile.read(min(length, node.params.max_payload_bytes + 1))
+                        self.close_connection = True
                         raise TestnetError("payload too large or empty")
                     body = self.rfile.read(length)
                     if len(body) != length:
@@ -434,6 +458,8 @@ class LocalNode:
                     payload = json.loads(body)
                     if self.path == "/sync":
                         accepted = node.receive_chain(payload)
+                        if accepted and node.state_path is not None:
+                            node.chain.save(node.state_path)
                         self._send({"accepted": accepted, "height": node.chain.height}, 200 if accepted else 400)
                     else:
                         block = Block.from_dict(payload)
@@ -459,10 +485,36 @@ class LocalNode:
             self._thread = None
 
     def receive_block(self, block: Block) -> bool:
-        return self.chain.add_block(block)
+        accepted = self.chain.add_block(block)
+        if accepted and self.state_path is not None:
+            self.chain.save(self.state_path)
+        return accepted
+
+    def reconcile_peer(self, peer_url: str) -> bool:
+        """Fetch and transactionally import a peer's advertised best chain."""
+        request = Request(peer_url.rstrip("/") + "/chain", method="GET")
+        try:
+            with urlopen(request, timeout=2) as response:
+                if response.status != 200:
+                    return False
+                payload = json.loads(response.read())
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return False
+        accepted = self.receive_chain(payload)
+        if accepted and self.state_path is not None:
+            self.chain.save(self.state_path)
+        return accepted
+
+    def reconcile_peers(self) -> int:
+        """Attempt reconciliation with all configured peers; return imports."""
+        imported = 0
+        for peer in tuple(self.peers):
+            if self.reconcile_peer(peer):
+                imported += 1
+        return imported
 
     def receive_chain(self, payload: dict) -> bool:
-        """Import all blocks from a peer after profile and linkage checks."""
+        """Import a peer chain transactionally after full validation."""
         if payload.get("network") != self.params.network:
             return False
         if payload.get("profile_id") != self.params.profile_id:
@@ -476,18 +528,29 @@ class LocalNode:
             return False
         if not blocks or blocks[0] != self.chain.genesis:
             return False
-        accepted = False
-        pending = {block.block_id: block for block in blocks[1:]}
-        while pending:
-            progressed = False
-            for block_id, block in list(pending.items()):
-                if self.chain.add_block(block):
+
+        with self.chain._lock:
+            known = dict(self.chain._blocks)
+            best = self.chain._best_tip_id
+            pending = {block.block_id: block for block in blocks[1:]}
+            while pending:
+                progressed = False
+                for block_id, block in list(pending.items()):
+                    parent = known.get(block.header.previous_hash)
+                    if parent is None or not validate_block(block, parent, self.params):
+                        continue
+                    known[block_id] = block
                     del pending[block_id]
                     progressed = True
-                    accepted = True
-            if not progressed:
-                return False
-        return accepted
+                if not progressed:
+                    return False
+            candidate = max(
+                known.values(), key=lambda block: (block.header.height, block.block_id)
+            )
+            changed = candidate.block_id != best or len(known) != len(self.chain._blocks)
+            self.chain._blocks = known
+            self.chain._best_tip_id = candidate.block_id
+            return changed
 
     def mine_and_broadcast(self, *, max_nonces: int = 100_000) -> Block:
         block = mine_next_block(
@@ -496,6 +559,8 @@ class LocalNode:
         )
         if not self.chain.add_block(block):
             raise TestnetError("locally mined block failed local validation")
+        if self.state_path is not None:
+            self.chain.save(self.state_path)
         payload = json.dumps(block.to_dict()).encode("utf-8")
         for peer in self.peers:
             try:

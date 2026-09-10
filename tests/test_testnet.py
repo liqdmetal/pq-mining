@@ -258,6 +258,53 @@ class TestnetNodeTests(unittest.TestCase):
             urlopen(request, timeout=2)
         self.assertEqual(error.exception.code, 400)
 
+    def test_sync_import_is_transactional_on_orphan(self):
+        source = LocalNode(self.params, "source")
+        target = LocalNode(self.params, "target")
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0)
+        first = source.mine_and_broadcast(max_nonces=128)
+        payload = source.chain.to_dict()
+        payload["blocks"].append({
+            "header": {
+                "version": 1, "height": 99, "previous_hash": "11" * 32,
+                "timestamp": 99, "miner_id": "orphan",
+                "profile_id": self.params.profile_id,
+            },
+            "nonce": 0, "support": [0],
+        })
+        before = target.chain.tip.block_id
+        self.assertFalse(target.receive_chain(payload))
+        self.assertEqual(target.chain.tip.block_id, before)
+        self.assertFalse(target.chain.has_block(first.block_id))
+
+    def test_restart_loads_persisted_chain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "node.json"
+            first = LocalNode(self.params, "first", state_path=path)
+            first.start(port=0)
+            block = first.mine_and_broadcast(max_nonces=128)
+            first.stop()
+            restarted = LocalNode(self.params, "restarted", state_path=path)
+            self.nodes.append(restarted)
+            restarted.start(port=0)
+            self.assertEqual(restarted.chain.tip.block_id, block.block_id)
+            self.assertEqual(restarted.chain.height, 1)
+            restarted.stop()
+
+    def test_reconcile_peer_chain_after_missed_blocks(self):
+        source = LocalNode(self.params, "source")
+        target = LocalNode(self.params, "target")
+        self.nodes = [source, target]
+        source.start(port=0)
+        target.start(port=0)
+        source.mine_and_broadcast(max_nonces=128)
+        source.mine_and_broadcast(max_nonces=128)
+        self.assertEqual(target.chain.height, 0)
+        self.assertTrue(target.reconcile_peer(source.url))
+        self.assertEqual(target.chain.tip.block_id, source.chain.tip.block_id)
+
 
 if __name__ == "__main__":
     unittest.main()
