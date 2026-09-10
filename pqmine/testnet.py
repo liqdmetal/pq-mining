@@ -23,6 +23,7 @@ from typing import Iterable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from .bounded_work import max_matched_bits_bounded
 from .partial_isd import PartialISDParams, solve_partial_mitm
 from .verifier import PoWParams, Share, derive_instance, verify_share
 
@@ -226,7 +227,12 @@ def expected_matched_bits(
     elapsed = previous.header.timestamp - window_start_timestamp
     delta = 1 if elapsed < target else -1 if elapsed > target else 0
     delta = max(-params.max_retarget_step, min(params.max_retarget_step, delta))
-    return max(1, min(params.pow.syndrome_bits, current + delta))
+    cap = max_matched_bits_bounded(
+        params.pow.n_columns,
+        params.pow.syndrome_bits,
+        params.pow.w_max,
+    )
+    return max(1, min(cap, current + delta))
 
 
 def _window_start_timestamp(

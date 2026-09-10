@@ -127,6 +127,29 @@ def mitm_attack_work(
     return best
 
 
+def max_matched_bits_bounded(
+    n: int,
+    syndrome_bits: int,
+    max_weight: int,
+    surplus_bits: float = 4.0,
+) -> int:
+    """Return the highest prefix difficulty retaining bounded-language surplus.
+
+    The verifier accepts every support weight from 1 through ``max_weight``.
+    Therefore the cap is derived from the sum of those support volumes, not from
+    the exact ``max_weight`` term alone.
+    """
+    _validate(n, syndrome_bits, max_weight, 1)
+    if surplus_bits < 0:
+        raise BoundedWorkError("surplus_bits must be non-negative")
+    total_terms = [log2_binom(n, weight) for weight in range(1, max_weight + 1)]
+    pivot = max(total_terms)
+    log2_volume = pivot + math.log2(
+        sum(2.0 ** (term - pivot) for term in total_terms)
+    )
+    return max(0, min(syndrome_bits, math.floor(log2_volume - surplus_bits)))
+
+
 def mitm_split_sweep(
     n: int, syndrome_bits: int, max_weight: int, matched_bits: int,
 ) -> list[MITMAttack]:
@@ -154,6 +177,7 @@ __all__ = [
     "BoundedWorkError",
     "MITMAttack",
     "log2_expected_bounded_solutions",
+    "max_matched_bits_bounded",
     "mitm_attack_work",
     "mitm_split_sweep",
 ]

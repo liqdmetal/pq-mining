@@ -105,7 +105,7 @@ Solution: retarget on **matched syndrome bits** `t ∈ [1, 256]`.
 
 - Expected solutions of weight ≤ `w_max`: `2^{log₂ Σ_{w≤32} C(512,w) − t}`
 - Satisfiability cap: `t_cap = max t with ≥ 2^4 expected solutions`
-  → **`t_cap = 164`** at `w_max=32`, `P(sat) = 1.000`
+  → **`t_cap = 165`** at `w_max=32`, `log₂(E) = 4.0086` (bounded-language cap)
 - Each `t` step is exactly 1 bit — same granularity as a hash target
 
 The old full-syndrome Stern/BJMM comparison is **not applicable** after

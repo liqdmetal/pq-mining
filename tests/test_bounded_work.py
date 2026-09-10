@@ -4,6 +4,7 @@ import unittest
 
 from pqmine.bounded_work import (
     log2_expected_bounded_solutions,
+    max_matched_bits_bounded,
     mitm_attack_work,
 )
 
@@ -30,6 +31,23 @@ class BoundedLanguageTests(unittest.TestCase):
         hard = mitm_attack_work(512, 256, 164, 164)
         easy = mitm_attack_work(512, 256, 32, 32)
         self.assertNotEqual(hard.work_bits, easy.work_bits)
+
+    def test_bounded_satisfiability_cap_uses_all_accepted_weights(self):
+        cap = max_matched_bits_bounded(512, 256, 32, surplus_bits=4.0)
+        self.assertEqual(cap, 165)
+        self.assertGreaterEqual(
+            log2_expected_bounded_solutions(512, 256, 32, cap), 4.0,
+        )
+        self.assertLess(
+            log2_expected_bounded_solutions(512, 256, 32, cap + 1), 4.0,
+        )
+
+    def test_bounded_cap_respects_syndrome_dimension(self):
+        self.assertEqual(max_matched_bits_bounded(64, 16, 8), 16)
+
+    def test_bounded_cap_rejects_negative_surplus(self):
+        with self.assertRaises(ValueError):
+            max_matched_bits_bounded(64, 16, 8, surplus_bits=-1.0)
 
 
 if __name__ == "__main__":
