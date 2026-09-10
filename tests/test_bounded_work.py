@@ -187,6 +187,46 @@ class BoundedLanguageTests(unittest.TestCase):
         self.assertEqual(result.summary()["capped"], True)
         self.assertIn("inconclusive", result.summary()["warning"])
 
+    def test_chunked_mitm_never_exceeds_index_budget(self):
+        params = PoWParams(n_columns=16, syndrome_bits=8, w_max=4, matched_bits=3)
+        header = b"chunked-mitm-toy"
+        columns, target = derive_instance(header, params, nonce=11)
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        result = execute_mitm_instance(
+            columns, target, 8, 3, 4, certificate.attack,
+            max_candidates=10_000,
+            index_chunk_entries=2,
+        )
+        self.assertTrue(result.found, result.summary())
+        self.assertFalse(result.capped)
+        self.assertLessEqual(result.peak_index_entries, 2)
+        self.assertGreaterEqual(result.chunks_processed, 1)
+        self.assertTrue(
+            verify_share(Share(header, 11, result.support), params).valid,
+        )
+
+    def test_chunked_mitm_exhaustion_reports_repeated_scan_work(self):
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        columns = tuple(index << 56 for index in range(16))
+        result = execute_mitm_instance(
+            columns, 1 << 63, 8, 3, 4, certificate.attack,
+            max_candidates=10_000,
+            index_chunk_entries=2,
+        )
+        self.assertFalse(result.found)
+        self.assertFalse(result.capped)
+        self.assertEqual(result.peak_index_entries, 2)
+        self.assertEqual(result.chunks_processed, 4)
+        self.assertEqual(result.candidates_enumerated, 40)
+
+    def test_chunk_size_must_be_positive(self):
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, certificate.attack,
+                index_chunk_entries=0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

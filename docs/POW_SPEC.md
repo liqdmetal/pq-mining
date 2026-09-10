@@ -129,7 +129,7 @@ The generic MITM number remains an **attack upper bound on security**, not a
 security claim. The repository now emits a machine-checkable accounting
 certificate for this construction: all `511` column splits and all `32`
 accepted support weights are swept, and the winning fields are independently
-recomputed. It also contains a bounded CPU executor for the certificate's
+recomputed. It also contains a chunked bounded CPU executor for the certificate's
 winning split; toy runs are checked through the canonical verifier, while the
 large-parameter executor is deliberately hard-capped and therefore
 inconclusive when capped. The executor independently re-derives list volumes,

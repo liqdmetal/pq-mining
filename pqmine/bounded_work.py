@@ -38,6 +38,8 @@ class MITMExecutionResult:
     support: tuple[int, ...] | None
     candidates_enumerated: int
     capped: bool
+    peak_index_entries: int = 0
+    chunks_processed: int = 0
 
     @property
     def found(self) -> bool:
@@ -49,6 +51,8 @@ class MITMExecutionResult:
             "support": list(self.support) if self.support is not None else None,
             "candidates_enumerated": self.candidates_enumerated,
             "capped": self.capped,
+            "peak_index_entries": self.peak_index_entries,
+            "chunks_processed": self.chunks_processed,
             "warning": (
                 "toy/reference execution only; capped results are inconclusive"
             ),
@@ -148,6 +152,7 @@ def execute_mitm_instance(
     attack: MITMAttack,
     *,
     max_candidates: int = 1_000_000,
+    index_chunk_entries: int | None = None,
 ) -> MITMExecutionResult:
     """Execute the certified two-list construction on one concrete instance.
 
@@ -197,33 +202,47 @@ def execute_mitm_instance(
         raise BoundedWorkError("memory accounting mismatch")
     if max_candidates <= 0:
         raise BoundedWorkError("max_candidates must be positive")
+    if index_chunk_entries is not None and index_chunk_entries <= 0:
+        raise BoundedWorkError("index_chunk_entries must be positive")
     total_bits = 64 * ((syndrome_bits + 63) // 64)
     mask = ((1 << matched_bits) - 1) << (total_bits - matched_bits)
     target_prefix = target & mask
     left = tuple(range(attack.split_index))
     right = tuple(range(attack.split_index, len(columns)))
-    left_map: dict[int, tuple[int, ...]] = {}
     checked = 0
-    for support in itertools.combinations(left, attack.left_weight):
-        if checked >= max_candidates:
-            return MITMExecutionResult(None, checked, True)
-        accumulator = 0
-        for index in support:
-            accumulator ^= columns[index]
-        left_map.setdefault(accumulator & mask, support)
-        checked += 1
-    for support in itertools.combinations(right, attack.right_weight):
-        if checked >= max_candidates:
-            return MITMExecutionResult(None, checked, True)
-        accumulator = 0
-        for index in support:
-            accumulator ^= columns[index]
-        needed = target_prefix ^ (accumulator & mask)
-        candidate = left_map.get(needed)
-        checked += 1
-        if candidate is not None:
-            return MITMExecutionResult(candidate + support, checked, False)
-    return MITMExecutionResult(None, checked, False)
+    peak_entries = 0
+    chunks = 0
+    left_supports = itertools.combinations(left, attack.left_weight)
+    right_supports = itertools.combinations(right, attack.right_weight)
+    chunk_limit = index_chunk_entries or max_candidates
+    while True:
+        left_map: dict[int, tuple[int, ...]] = {}
+        left_chunk = list(itertools.islice(left_supports, chunk_limit))
+        if not left_chunk:
+            break
+        chunks += 1
+        peak_entries = max(peak_entries, len(left_chunk))
+        for support in left_chunk:
+            if checked >= max_candidates:
+                return MITMExecutionResult(None, checked, True, peak_entries, chunks)
+            accumulator = 0
+            for index in support:
+                accumulator ^= columns[index]
+            left_map.setdefault(accumulator & mask, support)
+            checked += 1
+        for support in right_supports:
+            if checked >= max_candidates:
+                return MITMExecutionResult(None, checked, True, peak_entries, chunks)
+            accumulator = 0
+            for index in support:
+                accumulator ^= columns[index]
+            needed = target_prefix ^ (accumulator & mask)
+            candidate = left_map.get(needed)
+            checked += 1
+            if candidate is not None:
+                return MITMExecutionResult(candidate + support, checked, False, peak_entries, chunks)
+        right_supports = itertools.combinations(right, attack.right_weight)
+    return MITMExecutionResult(None, checked, False, peak_entries, chunks)
 
 
 def mitm_attack_work(
