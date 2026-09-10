@@ -178,14 +178,10 @@ def expected_matched_bits(previous: Block, params: ChainParams) -> int:
     if previous.header.height == 0:
         return current
     if previous.header.height % params.retarget_interval == 0:
-        # Research-only deterministic controller: apply the configured
-        # one-window reduction. Timestamp-window retargeting is a separate
+        # Research-only deterministic controller: one fixed step at a
+        # completed window. Timestamp-window retargeting is a separate
         # consensus task and must not be implied by this PoC.
-        return max(1, min(params.pow.syndrome_bits, current - params.max_retarget_step))
-    if previous.header.height % params.retarget_interval == 1 and current < params.pow.matched_bits:
-        # Small hysteresis keeps the toy controller from pinning difficulty
-        # forever after a window transition. This is not production economics.
-        return min(params.pow.matched_bits, current + 1)
+        return max(1, min(params.pow.syndrome_bits, current - min(1, params.max_retarget_step)))
     return current
 
 

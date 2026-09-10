@@ -173,12 +173,12 @@ class DifficultyConsensusTests(unittest.TestCase):
         third = mine_next_block(
             chain, self.params, miner_id="alice", max_nonces=128, timestamp=6,
         )
-        self.assertEqual(third.header.matched_bits, 4)
+        self.assertEqual(third.header.matched_bits, 7)
         self.assertTrue(chain.add_block(third))
         fourth = mine_next_block(
             chain, self.params, miner_id="alice", max_nonces=128, timestamp=8,
         )
-        self.assertEqual(fourth.header.matched_bits, 5)
+        self.assertEqual(fourth.header.matched_bits, 7)
 
     def test_wrong_retargeted_difficulty_is_rejected(self):
         chain = Chain(self.params)
