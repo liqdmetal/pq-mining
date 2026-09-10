@@ -242,6 +242,28 @@ class BoundedLanguageTests(unittest.TestCase):
                 index_chunk_entries=0,
             )
 
+    def test_large_real_instance_probe_uses_canonical_verifier(self):
+        params = PoWParams(
+            n_columns=512, syndrome_bits=256, w_max=60, matched_bits=256,
+        )
+        header = b"candidate-128-real-instance"
+        columns, target = derive_instance(header, params, nonce=23)
+        certificate = certify_mitm_attack(512, 256, 60, 256)
+        result = execute_mitm_instance(
+            columns, target, 256, 256, 60, certificate.attack,
+            max_candidates=1_000,
+            index_chunk_entries=32,
+        )
+        self.assertTrue(result.capped)
+        self.assertFalse(result.found)
+        self.assertEqual(result.candidates_enumerated, 1_000)
+        self.assertEqual(result.peak_index_entries, 32)
+        self.assertEqual(result.left_candidates_processed, 32)
+        self.assertEqual(result.right_candidates_processed, 968)
+        self.assertFalse(
+            verify_share(Share(header, 23, tuple(range(60))), params).valid,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

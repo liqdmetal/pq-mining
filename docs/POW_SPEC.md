@@ -133,7 +133,8 @@ recomputed. It also contains a chunked bounded CPU executor for the certificate'
 winning split; toy runs are checked through the canonical verifier, while the
 large-parameter executor is deliberately hard-capped and therefore
 inconclusive when capped. It reports peak indexed entries, chunks, and left/right
-candidate work. The executor independently re-derives list volumes,
+candidate work. Real `derive_instance()` columns and targets are used for both the recommended and candidate profiles; a capped probe is evidence only of bounded execution, not of a solved large instance. The executor independently re-derives list volumes,
+
 work, and pair-excess accounting before it searches, so tampered certificate
 fields are rejected. The certificate records the winning target weight `32`,
 split weights `17/15`, list exponents `82.4448/82.4461`, expected pair excess
