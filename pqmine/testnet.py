@@ -36,6 +36,21 @@ class ChainParams:
     pow: PoWParams
     max_future_seconds: int = 120
     network: str = NETWORK_NAME
+    max_payload_bytes: int = 64 * 1024
+
+    @property
+    def profile_id(self) -> str:
+        payload = {
+            "network": self.network,
+            "n_columns": self.pow.n_columns,
+            "syndrome_bits": self.pow.syndrome_bits,
+            "w_max": self.pow.w_max,
+            "matched_bits": self.pow.matched_bits,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:16]
+        return f"chitin-pow-{digest}"
 
 
 @dataclass(frozen=True)
@@ -45,6 +60,7 @@ class BlockHeader:
     previous_hash: str
     timestamp: int
     miner_id: str
+    profile_id: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +69,7 @@ class BlockHeader:
             "previous_hash": self.previous_hash,
             "timestamp": self.timestamp,
             "miner_id": self.miner_id,
+            "profile_id": self.profile_id,
         }
 
     @classmethod
@@ -63,6 +80,7 @@ class BlockHeader:
             previous_hash=str(value["previous_hash"]),
             timestamp=int(value["timestamp"]),
             miner_id=str(value["miner_id"]),
+            profile_id=str(value.get("profile_id", "")),
         )
 
     def canonical_bytes(self) -> bytes:
@@ -119,7 +137,7 @@ def _header_bytes(header: BlockHeader, params: ChainParams) -> bytes:
 def make_genesis(params: ChainParams, miner_id: str = "genesis") -> Block:
     """Create the deterministic height-zero anchor; genesis has no PoW share."""
     return Block(
-        header=BlockHeader(1, 0, ZERO_HASH, 0, miner_id),
+        header=BlockHeader(1, 0, ZERO_HASH, 0, miner_id, params.profile_id),
         nonce=0,
         support=(),
     )
@@ -136,6 +154,10 @@ def validate_block(
     try:
         header = block.header
         if header.version != 1:
+            return False
+        if header.profile_id != params.profile_id:
+            return False
+        if previous.header.profile_id != params.profile_id:
             return False
         if header.height != previous.header.height + 1:
             return False
@@ -192,6 +214,7 @@ def mine_next_block(
         previous_hash=previous.block_id,
         timestamp=stamp,
         miner_id=miner_id,
+        profile_id=params.profile_id,
     )
     header_bytes = _header_bytes(header, params)
     attack_params = PartialISDParams(
@@ -274,10 +297,36 @@ class Chain:
     def tip(self) -> Block:
         return self._blocks[self._best_tip_id]
 
+    @property
+    def profile_id(self) -> str:
+        return self.params.profile_id
+
+    def save(self, path) -> None:
+        """Persist the selected best chain as canonical JSON."""
+        payload = self.to_dict()
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def load(cls, path, params: ChainParams) -> "Chain":
+        """Load and validate a persisted best chain."""
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if payload.get("network") != params.network:
+            raise TestnetError("network mismatch")
+        if payload.get("profile_id") != params.profile_id:
+            raise TestnetError("profile mismatch")
+        blocks = [Block.from_dict(item) for item in payload.get("blocks", [])]
+        chain = cls.from_blocks(params, blocks)
+        if payload.get("tip") != chain.tip.block_id:
+            raise TestnetError("persisted tip mismatch")
+        return chain
+
     def to_dict(self) -> dict:
         with self._lock:
             return {
                 "network": self.params.network,
+                "profile_id": self.params.profile_id,
                 "height": self.height,
                 "tip": self.tip.block_id,
                 "blocks": [block.to_dict() for block in self._best_chain()],
@@ -337,6 +386,7 @@ class LocalNode:
                 if self.path == "/status":
                     self._send({
                         "network": node.params.network,
+                        "profile_id": node.params.profile_id,
                         "height": node.chain.height,
                         "tip": node.chain.tip.block_id,
                         "miner_id": node.miner_id,
@@ -352,7 +402,12 @@ class LocalNode:
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
-                    block = Block.from_dict(json.loads(self.rfile.read(length)))
+                    if length <= 0 or length > node.params.max_payload_bytes:
+                        raise TestnetError("payload too large or empty")
+                    body = self.rfile.read(length)
+                    if len(body) != length:
+                        raise TestnetError("truncated payload")
+                    block = Block.from_dict(json.loads(body))
                     accepted = node.receive_block(block)
                     self._send({"accepted": accepted}, 200 if accepted else 400)
                 except (ValueError, TypeError, KeyError, TestnetError, json.JSONDecodeError) as exc:

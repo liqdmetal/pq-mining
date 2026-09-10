@@ -1,8 +1,11 @@
 """Tests for the loopback-only Chitin-PoW testnet PoC."""
 
 import json
+import tempfile
 import threading
 import unittest
+from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from pqmine.verifier import PoWParams, Share
@@ -95,8 +98,33 @@ class TestnetConsensusTests(unittest.TestCase):
         self.assertTrue(self.chain.add_block(block))
         self.assertFalse(self.chain.add_block(block))
 
+    def test_profile_id_is_bound_to_genesis_and_header(self):
+        self.assertEqual(self.chain.profile_id, self.params.profile_id)
+        self.assertIn(self.params.profile_id, self.chain.genesis.header.profile_id)
+        block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertEqual(block.header.profile_id, self.params.profile_id)
+
+    def test_persistence_restart_round_trip(self):
+        block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertTrue(self.chain.add_block(block))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chain.json"
+            self.chain.save(path)
+            restored = Chain.load(path, self.params)
+            self.assertEqual(restored.height, self.chain.height)
+            self.assertEqual(restored.tip.block_id, self.chain.tip.block_id)
+
+    def test_profile_mismatch_is_rejected(self):
+        other = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=7),
+            max_future_seconds=3600,
+        )
+        block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertFalse(Chain(other).add_block(block))
+
 
 class TestnetNodeTests(unittest.TestCase):
+
     def setUp(self):
         self.params = ChainParams(
             pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=8),
@@ -131,6 +159,41 @@ class TestnetNodeTests(unittest.TestCase):
         payload = json.loads(raw)
         self.assertEqual(payload["network"], "chitin-pow-loopback-testnet")
         self.assertEqual(payload["height"], 0)
+        self.assertEqual(payload["profile_id"], self.params.profile_id)
+
+    def test_oversized_and_malformed_block_payloads_are_rejected(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        for payload in (b"not-json", b"{}", b"x" * (node.params.max_payload_bytes + 1)):
+            request = Request(
+                node.url + "/block", data=payload,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with self.assertRaises(HTTPError) as error:
+                urlopen(request, timeout=2)
+            self.assertEqual(error.exception.code, 400)
+
+    def test_http_profile_mismatch_is_rejected(self):
+        node = LocalNode(self.params, "alice")
+        self.nodes = [node]
+        node.start(port=0)
+        other = ChainParams(
+            pow=PoWParams(n_columns=32, syndrome_bits=32, w_max=4, matched_bits=7),
+            max_future_seconds=3600,
+        )
+        foreign = mine_next_block(Chain(other), other, miner_id="foreign", max_nonces=128)
+        request = Request(
+            node.url + "/block", data=json.dumps(foreign.to_dict()).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with self.assertRaises(HTTPError) as error:
+            urlopen(request, timeout=2)
+        self.assertEqual(error.exception.code, 400)
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":
