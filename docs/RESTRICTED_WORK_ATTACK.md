@@ -66,6 +66,28 @@ attack upper bound. It also does not validate that bound as a security level:
 other partitions, actual list-merging strategies, partial-syndrome ISD/BDD
 methods, quantum attacks, and walk-structure attacks remain outside this model.
 
+## Executable partial-ISD baseline
+
+`pqmine/partial_isd.py` is an intentionally bounded CPU reference solver for
+the same two-list relation. It uses combinations, so support entries are
+always distinct; it matches only the verifier's top `matched_bits`; and it can
+construct a real `Share` and pass it through `verify_share()`.
+
+Evidence:
+
+```text
+toy exhaustive targets checked: 16
+toy exact agreement with exhaustive accepted-support enumeration: true
+recommended-profile candidate cap: 100,000
+recommended-profile measured entries: 100,000 (16.610 bits)
+recommended-profile share found before cap: false
+```
+
+The recommended-profile run is deliberately capped and therefore
+**inconclusive**. It is a correctness/reference implementation, not a
+feasibility result and not a security measurement. Removing the cap is not
+permitted for the production-sized parameters on this workstation.
+
 ## Interpretation
 
 - The walk's observed admissibility rate is about **57.8%** in this bounded

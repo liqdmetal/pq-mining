@@ -46,7 +46,9 @@ does not claim ASIC-proof, FPGA-proof, CPU-only, or equal CPU/GPU mining.
 - `pqmine/decoupled.py`: CUDA/Numba benchmark path using synthetic H; it is
   not yet a complete consensus miner.
 - `pqmine/restriction_attack.py`: toy-scale structural screen, not a proof.
-- `pqmine/bounded_work.py`: conservative simple attack upper bound.
+- `pqmine/bounded_work.py`: conservative symbolic two-list attack upper bound.
+- `pqmine/partial_isd.py`: bounded CPU reference partial-syndrome solver; toy-validated, not a production solver.
+- `pqmine/bdd_attack.py`: symbolic multi-partition attack family; not a complete BDD/ISD implementation.
 - `pqmine/verifier.py`: consensus-rule reference implementation.
 
 ## Verification
