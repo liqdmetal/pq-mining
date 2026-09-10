@@ -75,6 +75,13 @@ class BoundedLanguageTests(unittest.TestCase):
         self.assertEqual(certificate.split_count, 511)
         self.assertEqual(certificate.weight_count, 32)
         self.assertAlmostEqual(certificate.attack.work_bits, 82.4461, places=3)
+        self.assertEqual(certificate.attack.target_weight, 32)
+        self.assertEqual(certificate.attack.left_weight, 17)
+        self.assertEqual(certificate.attack.right_weight, 15)
+        self.assertAlmostEqual(certificate.attack.left_list_bits, 82.4448, places=3)
+        self.assertAlmostEqual(certificate.attack.right_list_bits, 82.4461, places=3)
+        self.assertAlmostEqual(certificate.attack.expected_pair_excess_bits, 0.8909, places=3)
+        self.assertEqual(certificate.attack.memory_bits, certificate.attack.work_bits)
 
 
 if __name__ == "__main__":

@@ -129,7 +129,10 @@ The generic MITM number remains an **attack upper bound on security**, not a
 security claim. The repository now emits a machine-checkable accounting
 certificate for this construction: all `511` column splits and all `32`
 accepted support weights are swept, and the winning fields are independently
-recomputed. That certificate validates arithmetic and coverage only; it does
+recomputed. The certificate records the winning target weight `32`, split
+weights `17/15`, list exponents `82.4448/82.4461`, expected pair excess
+`0.8909` bits, and memory exponent `82.4461`. That certificate validates
+arithmetic and coverage only; it does
 not certify cryptanalytic optimality, practical large-parameter execution, or a
 security level. The walk estimate is only a conditional workload model because
 the verifier accepts arbitrary bounded supports. A better bounded-weight,

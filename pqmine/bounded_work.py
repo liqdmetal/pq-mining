@@ -31,6 +31,39 @@ class BoundedWorkError(ValueError):
 
 
 @dataclass(frozen=True)
+class MITMAttack:
+    """One two-list attack choice and its conservative work estimate."""
+
+    target_weight: int
+    left_weight: int
+    right_weight: int
+    left_list_bits: float
+    right_list_bits: float
+    matched_bits: int
+    work_bits: float
+    expected_pair_excess_bits: float
+    split_index: int
+
+    @property
+    def memory_bits(self) -> float:
+        return max(self.left_list_bits, self.right_list_bits)
+
+    def summary(self) -> dict:
+        return {
+            "target_weight": self.target_weight,
+            "left_weight": self.left_weight,
+            "right_weight": self.right_weight,
+            "left_list_bits": round(self.left_list_bits, 3),
+            "right_list_bits": round(self.right_list_bits, 3),
+            "matched_bits": self.matched_bits,
+            "work_bits_upper_bound": round(self.work_bits, 3),
+            "memory_bits": round(self.memory_bits, 3),
+            "expected_pair_excess_bits": round(self.expected_pair_excess_bits, 3),
+            "split_index": self.split_index,
+        }
+
+
+@dataclass(frozen=True)
 class MITMCertificate:
     """Machine-checkable accounting certificate for one MITM construction.
 
