@@ -130,6 +130,44 @@ the verifier accepts arbitrary bounded supports. A better bounded-weight,
 partial-syndrome, quantum, or structured-support attack may be faster. No
 certified security level is assigned until a coding theorist reviews the model.
 
+### Quantum accounting boundary
+
+`pqmine/quantum_work.py` records a conservative generic amplitude-amplification
+model over the accepted bounded-support language. At the recommended profile,
+`matched_bits=164` gives **82.000 quantum oracle-query bits** (`t/2`) versus
+**82.446 classical MITM work bits**. This means the current parameters do not
+support a 128-bit post-quantum claim.
+
+This is **not** a gate-level quantum ISD estimate. It excludes reversible
+SHAKE cost, qubit count, QRAM, circuit depth, error correction, and the
+quantum-walk ISD algorithms studied by Kachigar--Tillich (arXiv:1703.00263).
+Those algorithms can produce different concrete costs. The 82.000 number is a
+modeled quantum attack ceiling, not a measured attack and not a security level.
+
+### Candidate 128-bit modeled-floor profile — not approved
+
+A separate candidate profile is available in `pqmine/profiles.py`:
+
+```text
+n_columns=512, syndrome_bits=256, w_max=60, matched_bits=256
+expected accepted solutions: 2^6.879
+best tested classical MITM: 128.280 bits (cut 248, weight 59)
+generic Grover query model: 128.000 bits
+```
+
+This profile passes only the current symbolic screens. It is **not** called
+128-bit PQ-secure: quantum ISD/walk attacks, gate-level resources, concrete
+memory/time, implementation security, and independent coding-theory review are
+still missing. The loopback testnet continues using toy parameters by default.
+
+The profile can be printed with:
+
+```text
+python tools/show_profile.py
+```
+
+It must not be used as a live mining configuration.
+
 ## 6. Hardware profile — measured, not asserted
 
 All numbers from the 5900X (12C/24T) + RTX 3090, via the **fraction test**
