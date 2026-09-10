@@ -29,6 +29,36 @@ From `C:/Users/officeone/pq-mining`:
 python tools/run_loopback_testnet.py --blocks 3 --max-nonces 128 --matched-bits 8
 ```
 
+## Restart recovery
+
+Run the demonstrated stop/restart/reconcile scenario:
+
+```text
+python tools/run_loopback_testnet.py --blocks 3 --max-nonces 128 --matched-bits 8 --restart-recovery
+```
+
+The command persists both nodes, stops Bob while Alice mines, restarts Bob from
+its state file, imports Alice's chain through `/chain`, and verifies equal tip
+and height.
+
+## Persistent serve mode
+
+Run one node for manual loopback inspection:
+
+```text
+python tools/run_loopback_testnet.py --serve --state-dir C:/temp/chitin-alice --port 49613
+```
+
+Inspect:
+
+```text
+http://127.0.0.1:49613/status
+http://127.0.0.1:49613/chain
+```
+
+`--peer` is restricted to `http://127.0.0.1:<port>` by the launcher. No
+external bind or peer URL is accepted.
+
 The launcher uses toy parameters:
 
 ```text
