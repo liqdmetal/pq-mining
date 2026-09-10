@@ -32,6 +32,30 @@ class BoundedWorkError(ValueError):
 
 
 @dataclass(frozen=True)
+class MITMExecutionResult:
+    """Result of a capped executable two-list search."""
+
+    support: tuple[int, ...] | None
+    candidates_enumerated: int
+    capped: bool
+
+    @property
+    def found(self) -> bool:
+        return self.support is not None
+
+    def summary(self) -> dict:
+        return {
+            "found": self.found,
+            "support": list(self.support) if self.support is not None else None,
+            "candidates_enumerated": self.candidates_enumerated,
+            "capped": self.capped,
+            "warning": (
+                "toy/reference execution only; capped results are inconclusive"
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class MITMAttack:
     """One two-list attack choice and its conservative work estimate."""
 
@@ -61,30 +85,6 @@ class MITMAttack:
             "memory_bits": round(self.memory_bits, 3),
             "expected_pair_excess_bits": round(self.expected_pair_excess_bits, 3),
             "split_index": self.split_index,
-        }
-
-
-@dataclass(frozen=True)
-class MITMExecutionResult:
-    """Result of a capped executable two-list search."""
-
-    support: tuple[int, ...] | None
-    candidates_enumerated: int
-    capped: bool
-
-    @property
-    def found(self) -> bool:
-        return self.support is not None
-
-    def summary(self) -> dict:
-        return {
-            "found": self.found,
-            "support": list(self.support) if self.support is not None else None,
-            "candidates_enumerated": self.candidates_enumerated,
-            "capped": self.capped,
-            "warning": (
-                "toy/reference execution only; capped results are inconclusive"
-            ),
         }
 
 
@@ -200,6 +200,34 @@ def execute_mitm_instance(
         raise BoundedWorkError("left attack weight is out of range")
     if not (0 <= attack.right_weight <= len(columns) - attack.split_index):
         raise BoundedWorkError("right attack weight is out of range")
+    expected_left = log2_binom(attack.split_index, attack.left_weight)
+    expected_right = log2_binom(
+        len(columns) - attack.split_index, attack.right_weight,
+    )
+    expected_work = max(
+        max(expected_left, expected_right),
+        matched_bits - min(expected_left, expected_right),
+    )
+    expected_excess = expected_left + expected_right - matched_bits
+    if not math.isclose(
+        attack.left_list_bits, expected_left, rel_tol=0.0, abs_tol=1e-9,
+    ):
+        raise BoundedWorkError("left list accounting mismatch")
+    if not math.isclose(
+        attack.right_list_bits, expected_right, rel_tol=0.0, abs_tol=1e-9,
+    ):
+        raise BoundedWorkError("right list accounting mismatch")
+    if not math.isclose(
+        attack.work_bits, expected_work, rel_tol=0.0, abs_tol=1e-9,
+    ):
+        raise BoundedWorkError("work accounting mismatch")
+    if not math.isclose(
+        attack.expected_pair_excess_bits, expected_excess,
+        rel_tol=0.0, abs_tol=1e-9,
+    ):
+        raise BoundedWorkError("pair-excess accounting mismatch")
+    if attack.memory_bits != max(attack.left_list_bits, attack.right_list_bits):
+        raise BoundedWorkError("memory accounting mismatch")
     if max_candidates <= 0:
         raise BoundedWorkError("max_candidates must be positive")
     total_bits = 64 * ((syndrome_bits + 63) // 64)

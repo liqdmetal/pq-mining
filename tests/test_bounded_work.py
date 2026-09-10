@@ -120,6 +120,40 @@ class BoundedLanguageTests(unittest.TestCase):
                 tuple(range(16)), 0, 8, 3, 4, tampered,
             )
 
+    def test_executable_mitm_rejects_tampered_accounting_fields(self):
+        from dataclasses import replace
+
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        tampered = replace(
+            certificate.attack,
+            work_bits=certificate.attack.work_bits + 1.0,
+        )
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, tampered,
+            )
+        tampered = replace(
+            certificate.attack,
+            left_list_bits=certificate.attack.left_list_bits + 1.0,
+        )
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, tampered,
+            )
+
+    def test_executable_mitm_rejects_tampered_pair_excess(self):
+        from dataclasses import replace
+
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        tampered = replace(
+            certificate.attack,
+            expected_pair_excess_bits=certificate.attack.expected_pair_excess_bits + 1.0,
+        )
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, tampered,
+            )
+
     def test_executable_mitm_exhaustive_no_result_is_not_capped(self):
         certificate = certify_mitm_attack(16, 8, 4, 3)
         columns = tuple(index << 56 for index in range(16))
@@ -151,6 +185,7 @@ class BoundedLanguageTests(unittest.TestCase):
         self.assertTrue(result.capped)
         self.assertFalse(result.found)
         self.assertEqual(result.summary()["capped"], True)
+        self.assertIn("inconclusive", result.summary()["warning"])
 
 
 if __name__ == "__main__":

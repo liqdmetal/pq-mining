@@ -132,8 +132,10 @@ accepted support weights are swept, and the winning fields are independently
 recomputed. It also contains a bounded CPU executor for the certificate's
 winning split; toy runs are checked through the canonical verifier, while the
 large-parameter executor is deliberately hard-capped and therefore
-inconclusive when capped. The certificate records the winning target weight
-`32`, split weights `17/15`, list exponents `82.4448/82.4461`, expected pair excess
+inconclusive when capped. The executor independently re-derives list volumes,
+work, and pair-excess accounting before it searches, so tampered certificate
+fields are rejected. The certificate records the winning target weight `32`,
+split weights `17/15`, list exponents `82.4448/82.4461`, expected pair excess
 `0.8909` bits, and memory exponent `82.4461`. That certificate validates
 arithmetic and coverage only; it does
 not certify cryptanalytic optimality, practical large-parameter execution, or a
