@@ -214,35 +214,89 @@ def mine_next_block(
 
 
 class Chain:
-    """Single-branch in-memory chain for the isolated PoC."""
+    """Branch-aware in-memory chain for the isolated PoC.
+
+    Every valid block whose parent is known is retained. The exposed ``blocks``
+    view is the deterministic best chain: greatest height first, then greatest
+    block id on equal-height ties. This is cumulative-work selection for the
+    current fixed-work toy profile; it must be replaced by per-block work before
+    any production discussion.
+    """
 
     def __init__(self, params: ChainParams, miner_id: str = "genesis") -> None:
         self.params = params
-        self.blocks: list[Block] = [make_genesis(params, miner_id)]
+        genesis = make_genesis(params, miner_id)
+        self._blocks: dict[str, Block] = {genesis.block_id: genesis}
+        self._best_tip_id = genesis.block_id
         self._lock = threading.RLock()
+
+    @classmethod
+    def from_blocks(cls, params: ChainParams, blocks: list[Block]) -> "Chain":
+        """Build a branch-aware chain from a validated contiguous branch."""
+        if not blocks:
+            raise TestnetError("blocks must not be empty")
+        chain = cls(params, miner_id=blocks[0].header.miner_id)
+        genesis = chain.genesis
+        if blocks[0] != genesis:
+            raise TestnetError("invalid genesis for chain parameters")
+        for block in blocks[1:]:
+            if not chain.add_block(block):
+                raise TestnetError("invalid block in initial chain")
+        return chain
+
+    @property
+    def genesis(self) -> Block:
+        return self._blocks[next(
+            block_id for block_id, block in self._blocks.items()
+            if block.header.height == 0
+        )]
+
+    def _best_chain(self) -> list[Block]:
+        tip = self._blocks[self._best_tip_id]
+        reverse: list[Block] = []
+        while True:
+            reverse.append(tip)
+            if tip.header.height == 0:
+                break
+            tip = self._blocks[tip.header.previous_hash]
+        return list(reversed(reverse))
+
+    @property
+    def blocks(self) -> list[Block]:
+        with self._lock:
+            return self._best_chain()
 
     @property
     def height(self) -> int:
-        return self.blocks[-1].header.height
+        return self._blocks[self._best_tip_id].header.height
 
     @property
     def tip(self) -> Block:
-        return self.blocks[-1]
-
-    def add_block(self, block: Block) -> bool:
-        with self._lock:
-            if not validate_block(block, self.tip, self.params):
-                return False
-            self.blocks.append(block)
-            return True
+        return self._blocks[self._best_tip_id]
 
     def to_dict(self) -> dict:
         with self._lock:
             return {
                 "network": self.params.network,
                 "height": self.height,
-                "blocks": [block.to_dict() for block in self.blocks],
+                "tip": self.tip.block_id,
+                "blocks": [block.to_dict() for block in self._best_chain()],
             }
+
+    def add_block(self, block: Block) -> bool:
+        with self._lock:
+            if block.block_id in self._blocks:
+                return False
+            parent = self._blocks.get(block.header.previous_hash)
+            if parent is None or not validate_block(block, parent, self.params):
+                return False
+            self._blocks[block.block_id] = block
+            current = self._blocks[self._best_tip_id]
+            candidate_key = (block.header.height, block.block_id)
+            current_key = (current.header.height, current.block_id)
+            if candidate_key > current_key:
+                self._best_tip_id = block.block_id
+            return True
 
 
 class LocalNode:

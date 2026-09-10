@@ -63,6 +63,38 @@ class TestnetConsensusTests(unittest.TestCase):
         self.assertEqual(decoded, block)
         self.assertEqual(decoded.block_id, block.block_id)
 
+    def test_competing_valid_branch_with_more_work_wins(self):
+        first = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertTrue(self.chain.add_block(first))
+        side_parent = self.chain.genesis
+        side = mine_next_block(
+            Chain.from_blocks(self.params, [side_parent]),
+            self.params,
+            miner_id="bob",
+            max_nonces=128,
+        )
+        self.assertTrue(self.chain.add_block(side))
+        self.assertEqual(self.chain.tip.block_id, max(first.block_id, side.block_id))
+        self.assertEqual(self.chain.height, 1)
+
+    def test_longer_side_branch_reorganizes_tip(self):
+        first = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertTrue(self.chain.add_block(first))
+        side_chain = Chain.from_blocks(self.params, [self.chain.genesis])
+        side_one = mine_next_block(side_chain, self.params, miner_id="bob", max_nonces=128)
+        self.assertTrue(side_chain.add_block(side_one))
+        side_two = mine_next_block(side_chain, self.params, miner_id="bob", max_nonces=128)
+        self.assertTrue(side_chain.add_block(side_two))
+        self.assertTrue(self.chain.add_block(side_one))
+        self.assertTrue(self.chain.add_block(side_two))
+        self.assertEqual(self.chain.tip.block_id, side_two.block_id)
+        self.assertEqual([b.block_id for b in self.chain.blocks], [self.chain.genesis.block_id, side_one.block_id, side_two.block_id])
+
+    def test_duplicate_block_is_rejected(self):
+        block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        self.assertTrue(self.chain.add_block(block))
+        self.assertFalse(self.chain.add_block(block))
+
 
 class TestnetNodeTests(unittest.TestCase):
     def setUp(self):
