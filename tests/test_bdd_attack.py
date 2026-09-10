@@ -86,11 +86,12 @@ class MultiLevelModelTests(unittest.TestCase):
         )
         self.assertIn("single_two_list_bound", comparison)
         self.assertIn("best_multi_level", comparison)
-        # The default two-partition shape must reproduce the classical baseline.
+        # The canonical baseline now sweeps all two-list cuts. The symbolic
+        # multi-partition family is a separate, narrower model.
         work_two = comparison["single_two_list_work"]
         work_multi = comparison["best_multi_level_work"]
-        self.assertAlmostEqual(work_two, work_multi, places=3)
-        self.assertAlmostEqual(work_two, 83.0595, places=3)
+        self.assertGreaterEqual(work_multi, work_two)
+        self.assertAlmostEqual(work_two, 82.4461, places=3)
 
 if __name__ == "__main__":
     unittest.main()

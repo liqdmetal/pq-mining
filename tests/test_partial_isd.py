@@ -5,6 +5,7 @@ import unittest
 from pqmine.partial_isd import (
     PartialISDError,
     PartialISDParams,
+    partial_mitm_split_sweep,
     solve_and_verify,
     solve_partial_mitm,
 )
@@ -63,6 +64,35 @@ class PartialISDTests(unittest.TestCase):
         )
         self.assertTrue(result.capped)
         self.assertLessEqual(result.candidates_enumerated, 3)
+
+    def test_executable_split_sweep_covers_all_cuts(self):
+        shift = 60
+        columns = tuple(value << shift for value in range(1, 9))
+        results = partial_mitm_split_sweep(
+            columns, 1 << shift,
+            PartialISDParams(
+                syndrome_bits=4, matched_bits=4, max_weight=2,
+                max_candidates=100,
+            ),
+        )
+        self.assertEqual(len(results), len(columns) - 1)
+        self.assertEqual(
+            {result.split_index for result in results}, set(range(1, 8)),
+        )
+        self.assertTrue(any(result.found for result in results))
+
+    def test_explicit_split_is_used(self):
+        shift = 60
+        columns = tuple(value << shift for value in range(1, 9))
+        result = solve_partial_mitm(
+            columns, 1 << shift,
+            PartialISDParams(
+                syndrome_bits=4, matched_bits=4, max_weight=1,
+                split_index=3,
+            ),
+        )
+        self.assertTrue(result.found)
+        self.assertEqual(result.split_index, 3)
 
     def test_bad_parameters_rejected(self):
         with self.assertRaises(PartialISDError):

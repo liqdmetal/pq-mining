@@ -25,9 +25,10 @@ must fail.
 
 The intended hardness basis is code-based syndrome decoding, but the composed
 construction is **not certified**. The current bounded-language two-list MITM
-calculation reports an **83.06-bit attack upper bound** at
-`n=512, syndrome_bits=256, w_max=32, matched_bits=164`. This is not a security
-claim; a better bounded-weight or walk-structure attack may be faster.
+calculation reports an **82.45-bit attack upper bound** at
+`n=512, syndrome_bits=256, w_max=32, matched_bits=164`; the best cut is 215
+with target weight 32. This is not a security claim; a better bounded-weight
+or walk-structure attack may be faster.
 
 The reference walk reaches a structured subset of supports. The restricted-
 support question remains open even though the current toy audit found no gross

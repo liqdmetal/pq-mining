@@ -29,8 +29,9 @@ python -c "from pqmine.codebased import SDPParameters; from pqmine.latency_bound
 Measured run:
 
 ```text
-generic bounded MITM upper bound: 83.060 bits
-left/right list weights:           16 / 16
+generic bounded MITM upper bound: 82.446 bits
+best split index:                 215 / 297
+left/right list weights:          17 / 15
 walk samples:                      256
 walk admissible samples:           148
 walk admissibility probability:    0.578125
@@ -54,15 +55,16 @@ algorithm or an optimality result.
 At the recommended parameters:
 
 ```text
-classical two-list baseline: 83.059519 bits
-best tested multi-level:    83.059519 bits
-best tested weight:         32
-best tested partition:      (256, 256)
-improvement:                false
+canonical two-list baseline: 82.446094 bits
+best cut:                   215 / 297 (symmetric)
+best weight:                32
+best left/right weights:    17 / 15
+midpoint-only comparison:   83.059519 bits
 ```
 
-The tested multi-level family therefore does not lower the current 83.06-bit
-attack upper bound. It also does not validate that bound as a security level:
+Sweeping all two-list cuts lowers the former midpoint-only 83.06-bit attack
+upper bound to 82.45 bits. The tested multi-partition family does not improve
+on the swept two-list baseline. It also does not validate that bound as a security level:
 other partitions, actual list-merging strategies, partial-syndrome ISD/BDD
 methods, quantum attacks, and walk-structure attacks remain outside this model.
 

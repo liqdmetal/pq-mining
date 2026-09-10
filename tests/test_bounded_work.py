@@ -17,7 +17,8 @@ class BoundedLanguageTests(unittest.TestCase):
     def test_mitm_never_reports_negative_work(self):
         attack = mitm_attack_work(512, 256, 32, 164)
         self.assertGreaterEqual(attack.work_bits, 0.0)
-        self.assertLessEqual(attack.work_bits, 164.0)
+        self.assertLessEqual(attack.work_bits, 82.45)
+        self.assertEqual(attack.split_index, 215)
 
     def test_attack_has_an_explicit_weight(self):
         attack = mitm_attack_work(512, 256, 32, 164)
