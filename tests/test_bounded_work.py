@@ -4,11 +4,13 @@ import unittest
 
 from pqmine.bounded_work import (
     certify_mitm_attack,
+    execute_mitm_instance,
     log2_expected_bounded_solutions,
     max_matched_bits_bounded,
     mitm_attack_work,
     verify_mitm_certificate,
 )
+from pqmine.verifier import PoWParams, Share, derive_instance, verify_share
 
 
 class BoundedLanguageTests(unittest.TestCase):
@@ -82,6 +84,73 @@ class BoundedLanguageTests(unittest.TestCase):
         self.assertAlmostEqual(certificate.attack.right_list_bits, 82.4461, places=3)
         self.assertAlmostEqual(certificate.attack.expected_pair_excess_bits, 0.8909, places=3)
         self.assertEqual(certificate.attack.memory_bits, certificate.attack.work_bits)
+
+    def test_executable_mitm_finds_verifier_valid_toy_share(self):
+        params = PoWParams(n_columns=16, syndrome_bits=8, w_max=4, matched_bits=3)
+        header = b"mitm-toy"
+        columns, target = derive_instance(header, params, nonce=7)
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        result = execute_mitm_instance(
+            columns, target, 8, 3, 4, certificate.attack,
+            max_candidates=10_000,
+        )
+        self.assertTrue(result.found, result.summary())
+        self.assertFalse(result.capped)
+        self.assertTrue(
+            verify_share(Share(header, 7, result.support), params).valid,
+        )
+
+    def test_executable_mitm_hard_cap_is_inconclusive(self):
+        columns = tuple(index << 56 for index in range(16))
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        result = execute_mitm_instance(
+            columns, 1 << 63, 8, 3, 4, certificate.attack,
+            max_candidates=1,
+        )
+        self.assertTrue(result.capped)
+        self.assertFalse(result.found)
+
+    def test_executable_mitm_rejects_tampered_attack_parameters(self):
+        from dataclasses import replace
+
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        tampered = replace(certificate.attack, matched_bits=4)
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, tampered,
+            )
+
+    def test_executable_mitm_exhaustive_no_result_is_not_capped(self):
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        columns = tuple(index << 56 for index in range(16))
+        result = execute_mitm_instance(
+            columns, 1 << 63, 8, 3, 4, certificate.attack,
+            max_candidates=10_000,
+        )
+        self.assertFalse(result.found)
+        self.assertFalse(result.capped)
+        self.assertGreater(result.candidates_enumerated, 0)
+
+    def test_executable_mitm_validates_selected_split_weights(self):
+        from dataclasses import replace
+
+        certificate = certify_mitm_attack(16, 8, 4, 3)
+        tampered = replace(certificate.attack, left_weight=0)
+        with self.assertRaises(ValueError):
+            execute_mitm_instance(
+                tuple(range(16)), 0, 8, 3, 4, tampered,
+            )
+
+    def test_executable_mitm_large_parameter_run_is_explicitly_capped(self):
+        certificate = certify_mitm_attack(512, 256, 32, 164)
+        columns = tuple(range(512))
+        result = execute_mitm_instance(
+            columns, 0, 256, 164, 32, certificate.attack,
+            max_candidates=1_000,
+        )
+        self.assertTrue(result.capped)
+        self.assertFalse(result.found)
+        self.assertEqual(result.summary()["capped"], True)
 
 
 if __name__ == "__main__":

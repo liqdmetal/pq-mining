@@ -20,6 +20,7 @@ verifier until a coding theorist supplies a proper bounded-language model.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 
@@ -60,6 +61,30 @@ class MITMAttack:
             "memory_bits": round(self.memory_bits, 3),
             "expected_pair_excess_bits": round(self.expected_pair_excess_bits, 3),
             "split_index": self.split_index,
+        }
+
+
+@dataclass(frozen=True)
+class MITMExecutionResult:
+    """Result of a capped executable two-list search."""
+
+    support: tuple[int, ...] | None
+    candidates_enumerated: int
+    capped: bool
+
+    @property
+    def found(self) -> bool:
+        return self.support is not None
+
+    def summary(self) -> dict:
+        return {
+            "found": self.found,
+            "support": list(self.support) if self.support is not None else None,
+            "candidates_enumerated": self.candidates_enumerated,
+            "capped": self.capped,
+            "warning": (
+                "toy/reference execution only; capped results are inconclusive"
+            ),
         }
 
 
@@ -145,6 +170,65 @@ def _validate(n: int, syndrome_bits: int, max_weight: int,
         raise BoundedWorkError("max_weight must lie in (0,n)")
     if not (0 < matched_bits <= syndrome_bits):
         raise BoundedWorkError("matched_bits must lie in (0,syndrome_bits]")
+
+
+def execute_mitm_instance(
+    columns: tuple[int, ...],
+    target: int,
+    syndrome_bits: int,
+    matched_bits: int,
+    max_weight: int,
+    attack: MITMAttack,
+    *,
+    max_candidates: int = 1_000_000,
+) -> MITMExecutionResult:
+    """Execute the certified two-list construction on one concrete instance.
+
+    This bounded CPU executor builds one list, indexes by the matched prefix,
+    and scans the other list. A capped result is inconclusive.
+    """
+    _validate(len(columns), syndrome_bits, max_weight, matched_bits)
+    if not (0 < attack.split_index < len(columns)):
+        raise BoundedWorkError("attack split does not match columns")
+    if attack.matched_bits != matched_bits:
+        raise BoundedWorkError("attack matched_bits mismatch")
+    if attack.target_weight > max_weight:
+        raise BoundedWorkError("attack weight exceeds max_weight")
+    if attack.target_weight != attack.left_weight + attack.right_weight:
+        raise BoundedWorkError("attack weights do not sum to target weight")
+    if not (0 <= attack.left_weight <= attack.split_index):
+        raise BoundedWorkError("left attack weight is out of range")
+    if not (0 <= attack.right_weight <= len(columns) - attack.split_index):
+        raise BoundedWorkError("right attack weight is out of range")
+    if max_candidates <= 0:
+        raise BoundedWorkError("max_candidates must be positive")
+    total_bits = 64 * ((syndrome_bits + 63) // 64)
+    mask = ((1 << matched_bits) - 1) << (total_bits - matched_bits)
+    target_prefix = target & mask
+    left = tuple(range(attack.split_index))
+    right = tuple(range(attack.split_index, len(columns)))
+    left_map: dict[int, tuple[int, ...]] = {}
+    checked = 0
+    for support in itertools.combinations(left, attack.left_weight):
+        if checked >= max_candidates:
+            return MITMExecutionResult(None, checked, True)
+        accumulator = 0
+        for index in support:
+            accumulator ^= columns[index]
+        left_map.setdefault(accumulator & mask, support)
+        checked += 1
+    for support in itertools.combinations(right, attack.right_weight):
+        if checked >= max_candidates:
+            return MITMExecutionResult(None, checked, True)
+        accumulator = 0
+        for index in support:
+            accumulator ^= columns[index]
+        needed = target_prefix ^ (accumulator & mask)
+        candidate = left_map.get(needed)
+        checked += 1
+        if candidate is not None:
+            return MITMExecutionResult(candidate + support, checked, False)
+    return MITMExecutionResult(None, checked, False)
 
 
 def mitm_attack_work(
@@ -288,7 +372,9 @@ __all__ = [
     "BoundedWorkError",
     "MITMAttack",
     "MITMCertificate",
+    "MITMExecutionResult",
     "certify_mitm_attack",
+    "execute_mitm_instance",
     "log2_expected_bounded_solutions",
     "max_matched_bits_bounded",
     "mitm_attack_work",
