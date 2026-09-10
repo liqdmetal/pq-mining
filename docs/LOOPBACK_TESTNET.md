@@ -23,13 +23,30 @@ consensus, and does not claim post-quantum security.
 Both nodes bind to `127.0.0.1`. There is no peer discovery, wallet, payout,
 external network, or GPU allocation.
 
-## Run
+## Run the in-process smoke harness
 
 From `C:/Users/officeone/pq-mining`:
 
 ```text
 python tools/run_loopback_testnet.py --blocks 3 --max-nonces 128 --matched-bits 8
 ```
+
+## Run the separate-process testnet
+
+This starts two independent Python processes with separate state files. Alice
+mines the toy profile; Bob reconciles over loopback HTTP. The parent process
+owns cleanup and prints one machine-readable final report.
+
+```text
+python tools/run_loopback_network.py \
+  --state-dir C:/temp/chitin-network \
+  --run-for 10 \
+  --mine-interval 0.2 \
+  --max-nonces 128
+```
+
+The runner is deliberately bounded and loopback-only. It refuses non-loopback
+peers. It is a process/lifecycle testnet, not a public or LAN network.
 
 ## Restart recovery
 
@@ -110,6 +127,7 @@ PQ security or evidence of practical mining feasibility.
 
 ```text
 python -m pytest tests/test_testnet.py -q
+python -m pytest tests/test_process_testnet.py -q
 python -m pytest tests/ -q
 ```
 
