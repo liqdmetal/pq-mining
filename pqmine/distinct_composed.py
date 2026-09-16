@@ -169,6 +169,12 @@ if NUMBA_AVAILABLE:
             )
             out[i] = syn
             probes_out[i] = probes
+else:
+    # Keep the module importable when the optional Numba dependency is absent.
+    # Measurement functions below still fail closed with "numba unavailable";
+    # importing a research/audit module must not fail before they can report it.
+    def _cpu_distinct_one(*_args, **_kwargs):
+        raise DistinctComposedError("numba unavailable")
 
 
 @dataclass(frozen=True)

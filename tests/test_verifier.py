@@ -112,6 +112,30 @@ class VerifierRuleTests(unittest.TestCase):
         v = verify_share(Share(self.header, 0, ()), self.params)
         self.assertFalse(v.valid)
 
+    def test_malformed_support_values_are_rejected_without_raising(self):
+        for support in (("1",), (None,), (True,), (1.5,)):
+            with self.subTest(support=support):
+                verdict = verify_share(Share(self.header, 0, support), self.params)
+                self.assertFalse(verdict.valid)
+                self.assertIn("not an integer", verdict.reason)
+
+    def test_oversized_support_is_rejected_before_expensive_work(self):
+        support = tuple(range(self.params.w_max + 1))
+        verdict = verify_share(Share(self.header, 0, support), self.params)
+        self.assertFalse(verdict.valid)
+        self.assertIn("w_max", verdict.reason)
+
+    def test_malformed_share_shape_is_rejected_without_raising(self):
+        malformed_support = verify_share(
+            Share(self.header, 0, {1, 2}), self.params,
+        )
+        malformed_header = verify_share(
+            Share("not-bytes", 0, (1,)), self.params,
+        )
+        self.assertFalse(malformed_support.valid)
+        self.assertFalse(malformed_header.valid)
+        self.assertIn("malformed", malformed_header.reason)
+
     def test_harder_difficulty_rejects_easy_share(self):
         """Raising matched_bits must not retroactively accept."""
         harder = PoWParams(n_columns=64, syndrome_bits=64, w_max=4, matched_bits=40)

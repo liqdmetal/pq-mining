@@ -122,9 +122,36 @@ _mask = syndrome_mask
 
 def verify_share(share: Share, params: PoWParams) -> Verdict:
     """Rules (1)-(4). Never trusts anything the miner reported."""
-    support = tuple(share.support)
+    # Reject oversized concrete containers before copying or hashing them. The
+    # network payload has its own byte limit, but this function is also used as
+    # a consensus boundary and must not allocate in proportion to an attacker-
+    # supplied support far beyond w_max.
+    raw_support = getattr(share, "support", None)
+    if not isinstance(raw_support, (tuple, list)):
+        return Verdict(False, "support is not an iterable sequence", 0, 0)
+    try:
+        if len(raw_support) > params.w_max:
+            return Verdict(
+                False,
+                f"weight {len(raw_support)} > w_max {params.w_max}",
+                len(raw_support),
+                0,
+            )
+    except TypeError:
+        return Verdict(False, "support is not an iterable sequence", 0, 0)
 
-    # (1) distinct, in range. Duplicates are the F_2 cancellation attack.
+    try:
+        support = tuple(raw_support)
+    except (TypeError, ValueError):
+        return Verdict(False, "support is not an iterable sequence", 0, 0)
+
+    # (1) Support values must be plain integer column indices. Rejecting
+    # malformed values here keeps the consensus verifier fail-closed instead
+    # of leaking TypeError from comparisons or hashing.
+    if any(isinstance(j, bool) or not isinstance(j, int) for j in support):
+        return Verdict(False, "column index is not an integer", len(support), 0)
+
+    # (2) distinct, in range. Duplicates are the F_2 cancellation attack.
     if len(set(support)) != len(support):
         return Verdict(False, "duplicate column (F_2 cancellation attack)",
                        len(support), 0)
@@ -133,14 +160,19 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
     if not support:
         return Verdict(False, "empty support", 0, 0)
 
-    # (2) bounded weight.
+    # (3) bounded weight.
     if len(support) > params.w_max:
         return Verdict(False, f"weight {len(support)} > w_max {params.w_max}",
                        len(support), 0)
 
-    # (3) syndrome relation on the matched bits. (4) H, s from header.
-    columns = derive_columns(share.header, params, share.nonce)
-    target = derive_target(share.header, params, share.nonce)
+    # (4) Syndrome relation on the matched bits. H and s come from the
+    # header/nonce instance, never from the submitted share.
+    try:
+        columns = derive_columns(share.header, params, share.nonce)
+        target = derive_target(share.header, params, share.nonce)
+    except (TypeError, ValueError, OverflowError):
+        return Verdict(False, "malformed header or nonce", len(support), 0)
+
     acc = 0
     for j in support:
         acc ^= columns[j]
