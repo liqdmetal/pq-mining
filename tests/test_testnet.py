@@ -17,6 +17,7 @@ from pqmine.testnet import (
     ChainParams,
     LocalNode,
     TestnetError,
+    cumulative_work,
     make_genesis,
     mine_next_block,
     validate_chain,
@@ -72,6 +73,41 @@ class TestnetConsensusTests(unittest.TestCase):
         decoded = Block.from_dict(block.to_dict())
         self.assertEqual(decoded, block)
         self.assertEqual(decoded.block_id, block.block_id)
+
+    def test_cumulative_work_rejects_non_decreasing_ancestry(self):
+        parent = Block(
+            BlockHeader(1, 2, "00" * 32, 1, "parent"),
+            0,
+            (1,),
+        )
+        child = Block(
+            BlockHeader(1, 2, parent.block_id, 2, "child"),
+            0,
+            (1,),
+        )
+        with self.assertRaises(TestnetError):
+            cumulative_work(child, {parent.block_id: parent})
+
+    def test_json_decoder_rejects_numeric_coercion_and_bad_identifiers(self):
+        block = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
+        payload = block.to_dict()
+
+        cases = [
+            ("header.version", {"header": {**payload["header"], "version": True}}),
+            ("header.timestamp", {"header": {**payload["header"], "timestamp": 1.5}}),
+            ("header.miner_id", {"header": {**payload["header"], "miner_id": 7}}),
+            ("header.previous_hash", {"header": {**payload["header"], "previous_hash": "x"}}),
+            ("nonce", {"nonce": True}),
+            ("support", {"support": {"0": 1}}),
+            ("support index", {"support": [True]}),
+            ("block_id", {"block_id": payload["block_id"].upper()}),
+        ]
+        for field, change in cases:
+            with self.subTest(field=field):
+                malformed = dict(payload)
+                malformed.update(change)
+                with self.assertRaises(TestnetError):
+                    Block.from_dict(malformed)
 
     def test_competing_valid_branch_with_more_work_wins(self):
         first = mine_next_block(self.chain, self.params, miner_id="alice", max_nonces=128)
@@ -233,6 +269,17 @@ class TestnetConsensusTests(unittest.TestCase):
 
 
 class DifficultyConsensusTests(unittest.TestCase):
+
+    def test_profile_above_satisfiability_cap_is_rejected(self):
+        with self.assertRaises(TestnetError):
+            ChainParams(
+                pow=PoWParams(
+                    n_columns=32,
+                    syndrome_bits=32,
+                    w_max=1,
+                    matched_bits=2,
+                ),
+            )
 
     def setUp(self):
         self.params = ChainParams(

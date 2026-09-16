@@ -59,6 +59,22 @@ class ChainParams:
             raise TestnetError("median_time_window must be a positive odd integer")
         if not (0 < self.pow.matched_bits <= self.pow.syndrome_bits):
             raise TestnetError("initial matched_bits outside syndrome range")
+        # Do not allow a chain to start above the bounded-language
+        # satisfiability cap. Such a profile can make honest blocks
+        # statistically unsolvable while still appearing well-formed.
+        try:
+            cap = max_matched_bits_bounded(
+                self.pow.n_columns,
+                self.pow.syndrome_bits,
+                self.pow.w_max,
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise TestnetError(f"invalid PoW profile: {error}") from error
+        if cap < 1 or self.pow.matched_bits > cap:
+            raise TestnetError(
+                f"initial matched_bits {self.pow.matched_bits} exceeds "
+                f"bounded satisfiability cap {cap}"
+            )
 
     @property
     def profile_id(self) -> str:
@@ -77,6 +93,28 @@ class ChainParams:
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()[:16]
         return f"chitin-pow-{digest}"
+
+
+def _strict_int(value, field: str) -> int:
+    """Decode a JSON integer without accepting bool or numeric coercion."""
+    if type(value) is not int:
+        raise TestnetError(f"{field} must be an integer")
+    return value
+
+
+def _strict_text(value, field: str) -> str:
+    """Decode a JSON string without accepting implicit stringification."""
+    if type(value) is not str:
+        raise TestnetError(f"{field} must be a string")
+    return value
+
+
+def _strict_hash(value, field: str) -> str:
+    """Require the canonical lowercase 32-byte hexadecimal form."""
+    text = _strict_text(value, field)
+    if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+        raise TestnetError(f"{field} must be 64 lowercase hexadecimal characters")
+    return text
 
 
 @dataclass(frozen=True)
@@ -102,14 +140,23 @@ class BlockHeader:
 
     @classmethod
     def from_dict(cls, value: dict) -> "BlockHeader":
+        if type(value) is not dict:
+            raise TestnetError("header must be an object")
+        profile_id = _strict_text(value.get("profile_id", ""), "profile_id")
+        if profile_id and (
+            not profile_id.startswith("chitin-pow-")
+            or len(profile_id) != len("chitin-pow-") + 16
+            or any(char not in "0123456789abcdef" for char in profile_id[len("chitin-pow-"):])
+        ):
+            raise TestnetError("profile_id has invalid canonical form")
         return cls(
-            version=int(value["version"]),
-            height=int(value["height"]),
-            previous_hash=str(value["previous_hash"]),
-            timestamp=int(value["timestamp"]),
-            miner_id=str(value["miner_id"]),
-            matched_bits=int(value.get("matched_bits", 0)),
-            profile_id=str(value.get("profile_id", "")),
+            version=_strict_int(value.get("version"), "version"),
+            height=_strict_int(value.get("height"), "height"),
+            previous_hash=_strict_hash(value.get("previous_hash"), "previous_hash"),
+            timestamp=_strict_int(value.get("timestamp"), "timestamp"),
+            miner_id=_strict_text(value.get("miner_id"), "miner_id"),
+            matched_bits=_strict_int(value.get("matched_bits", 0), "matched_bits"),
+            profile_id=profile_id,
         )
 
     def canonical_bytes(self) -> bytes:
@@ -148,14 +195,23 @@ class Block:
 
     @classmethod
     def from_dict(cls, value: dict) -> "Block":
+        if type(value) is not dict:
+            raise TestnetError("block must be an object")
+        raw_support = value.get("support")
+        if type(raw_support) is not list:
+            raise TestnetError("support must be a JSON array")
+        support = []
+        for index in raw_support:
+            support.append(_strict_int(index, "support index"))
         block = cls(
-            header=BlockHeader.from_dict(value["header"]),
-            nonce=int(value["nonce"]),
-            support=tuple(int(index) for index in value["support"]),
+            header=BlockHeader.from_dict(value.get("header")),
+            nonce=_strict_int(value.get("nonce"), "nonce"),
+            support=tuple(support),
         )
         supplied = value.get("block_id")
-        if supplied is not None and supplied != block.block_id:
-            raise TestnetError("block_id does not match canonical block bytes")
+        if supplied is not None:
+            if _strict_hash(supplied, "block_id") != block.block_id:
+                raise TestnetError("block_id does not match canonical block bytes")
         return block
 
 
@@ -171,15 +227,31 @@ def block_work(block: Block) -> int:
 
 
 def cumulative_work(block: Block, blocks: dict[str, Block]) -> int:
-    """Return cumulative work from genesis through ``block``."""
+    """Return cumulative work from genesis through ``block``.
+
+    The graph is normally populated only through validated blocks, but this
+    helper also protects callers that supply an arbitrary graph. Height and
+    visited-ID checks prevent malformed ancestry from looping forever.
+    """
     total = 0
     cursor = block
+    visited: set[str] = set()
     while cursor.header.height > 0:
+        block_id = cursor.block_id
+        if block_id in visited:
+            raise TestnetError("cycle in chain ancestry")
+        visited.add(block_id)
+        if cursor.header.height < 0:
+            raise TestnetError("negative block height")
         total += block_work(cursor)
         parent = blocks.get(cursor.header.previous_hash)
         if parent is None:
             raise TestnetError("missing parent while calculating chain work")
+        if parent.header.height >= cursor.header.height:
+            raise TestnetError("non-decreasing ancestry height")
         cursor = parent
+    if cursor.header.height < 0:
+        raise TestnetError("negative block height")
     return total
 
 
@@ -247,8 +319,16 @@ def _window_start_timestamp(
         return None
     target_height = previous.header.height - params.retarget_interval + 1
     cursor = previous
+    visited: set[str] = set()
     while cursor.header.height > target_height:
-        cursor = blocks[cursor.header.previous_hash]
+        block_id = cursor.block_id
+        if block_id in visited:
+            raise TestnetError("cycle in difficulty-window ancestry")
+        visited.add(block_id)
+        parent = blocks.get(cursor.header.previous_hash)
+        if parent is None or parent.header.height >= cursor.header.height:
+            raise TestnetError("invalid difficulty-window ancestry")
+        cursor = parent
     return cursor.header.timestamp
 
 
@@ -272,11 +352,19 @@ def median_time_past(
     """Return the upper median of the validated recent ancestor timestamps."""
     timestamps: list[int] = []
     cursor = previous
+    visited: set[str] = set()
     for _ in range(params.median_time_window):
+        block_id = cursor.block_id
+        if block_id in visited:
+            raise TestnetError("cycle in median-time ancestry")
+        visited.add(block_id)
         timestamps.append(cursor.header.timestamp)
         if cursor.header.height == 0:
             break
-        cursor = blocks[cursor.header.previous_hash]
+        parent = blocks.get(cursor.header.previous_hash)
+        if parent is None or parent.header.height >= cursor.header.height:
+            raise TestnetError("invalid median-time ancestry")
+        cursor = parent
     timestamps.sort()
     return timestamps[len(timestamps) // 2]
 
@@ -467,11 +555,19 @@ class Chain:
     def _best_chain(self) -> list[Block]:
         tip = self._blocks[self._best_tip_id]
         reverse: list[Block] = []
+        visited: set[str] = set()
         while True:
+            block_id = tip.block_id
+            if block_id in visited:
+                raise TestnetError("cycle in selected chain")
+            visited.add(block_id)
             reverse.append(tip)
             if tip.header.height == 0:
                 break
-            tip = self._blocks[tip.header.previous_hash]
+            parent = self._blocks.get(tip.header.previous_hash)
+            if parent is None or parent.header.height >= tip.header.height:
+                raise TestnetError("invalid selected-chain ancestry")
+            tip = parent
         return list(reversed(reverse))
 
     def _chain_work(self, tip: Block) -> int:
