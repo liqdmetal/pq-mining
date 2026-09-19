@@ -168,13 +168,22 @@ A separate candidate profile is available in `pqmine/profiles.py`:
 n_columns=512, syndrome_bits=256, w_max=60, matched_bits=256
 expected accepted solutions: 2^6.879
 best tested classical MITM: 128.280 bits (cut 248, weight 59)
-generic Grover query model: 128.000 bits
+naive Grover query model: 128.000 bits (t/2)
+quantum ISD bound (0.05869*n): 30.049 bits  <-- BINDING
 ```
 
-This profile passes only the current symbolic screens. It is **not** called
-128-bit PQ-secure: quantum ISD/walk attacks, gate-level resources, concrete
-memory/time, implementation security, and independent coding-theory review are
-still missing. The loopback testnet continues using toy parameters by default.
+This profile passes only the current *classical* symbolic screen. It is
+**not** 128-bit PQ-secure: the quantum ISD bound (Kachigar–Tillich,
+`0.05869 * n = 30.049` bits at n=512) is the binding quantum constraint and
+is far below 128 bits. The naive Grover count (t/2 = 128) is **not** a
+conservative PQ bound because quantum ISD exploits the code structure and is
+cheaper. To clear a 128-bit quantum floor under the ISD bound the code length
+must satisfy `0.05869 * n >= 128`, i.e. `n >= 2181`. The repository's
+`candidate_128_profile()` therefore uses `n=2304, syndrome=1152, w_max=60,
+matched_bits=392`, giving ~135 quantum bits and ~197 classical MITM bits.
+Gate-level resources, concrete memory/time, implementation security, and
+independent coding-theory review are still missing. The loopback testnet
+continues using toy parameters by default.
 
 The profile can be printed with:
 

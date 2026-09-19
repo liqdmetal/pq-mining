@@ -322,6 +322,13 @@ def _split_work(exponents: Sequence[float], t: int) -> float:
                 left += e
             else:
                 right += e
+        # Feasibility gate: the two groups together must carry at least t bits
+        # of entropy to cover the t-bit matched syndrome. If left + right < t,
+        # no match can exist and the shape is infeasible regardless of the
+        # batching formula. Without this gate the formula reports a finite
+        # (and misleadingly low) work for under-sized lists.
+        if left + right < t:
+            continue
         work = max(left, right, t - min(left, right))
         if work < best:
             best = work

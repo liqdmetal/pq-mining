@@ -48,8 +48,14 @@ class ProfileScreen:
             "classical_attack_bits": round(self.classical_attack.work_bits, 6),
             "classical_split_index": self.classical_attack.split_index,
             "classical_attack_weight": self.classical_attack.target_weight,
+            "quantum_naive_grover_query_bits": round(
+                self.quantum_attack.naive_grover_query_bits, 6,
+            ),
             "quantum_grover_query_bits": round(
                 self.quantum_attack.grover_query_bits, 6,
+            ),
+            "quantum_isd_bits": round(
+                self.quantum_attack.quantum_isd_bits, 6,
             ),
             "passes_current_modeled_floor": self.passes_modeled_floor,
             "warning": (
@@ -97,12 +103,20 @@ def screen_profile(
 
 
 def candidate_128_profile() -> ProfileScreen:
-    """Return the first profile passing the current 128-bit modeled screens."""
+    """Return a profile passing the current 128-bit modeled screens.
+
+    The naive-Grover model (2^(t/2)) is NOT a conservative PQ bound: the
+    best known quantum attack on the underlying syndrome-decoding problem is
+    quantum ISD (Kachigar-Tillich, 2^(0.05869 n)). To clear a 128-bit
+    quantum floor under that bound the code length must satisfy
+    0.05869 * n >= 128, i.e. n >= 2181. n=2304 gives ~135 bits of quantum
+    margin and ~197 bits of classical MITM margin at w_max=60.
+    """
     params = PoWParams(
-        n_columns=512,
-        syndrome_bits=256,
+        n_columns=2304,
+        syndrome_bits=1152,
         w_max=60,
-        matched_bits=256,
+        matched_bits=392,
     )
     return screen_profile("candidate-128-modeled-floor", params)
 

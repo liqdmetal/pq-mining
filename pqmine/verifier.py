@@ -48,7 +48,11 @@ class PoWParams:
     matched_bits: int = 164        # DIFFICULTY: retargetable, <= syndrome_bits
 
     def __post_init__(self) -> None:
-        if not (0 < self.matched_bits <= self.syndrome_bits <= 64 * 8):
+        # syndrome_bits is capped at 4096 (64 words of 64 bits) to allow
+        # code lengths large enough for a true 128-bit post-quantum bound.
+        # Quantum ISD (Kachigar-Tillich, 2^(0.05869 n)) requires n >= 2181
+        # for 128 bits; at rate 1/2 that needs syndrome_bits >= 1091.
+        if not (0 < self.matched_bits <= self.syndrome_bits <= 64 * 64):
             raise ShareError("matched_bits must be in (0, syndrome_bits]")
         if not (0 < self.w_max < self.n_columns):
             raise ShareError("w_max must be in (0, n_columns)")

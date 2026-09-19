@@ -11,9 +11,12 @@ class ProfileScreenTests(unittest.TestCase):
         screen = candidate_128_profile()
         self.assertTrue(screen.passes_modeled_floor, screen.summary())
         self.assertEqual(screen.params.w_max, 60)
-        self.assertEqual(screen.params.matched_bits, 256)
+        self.assertEqual(screen.params.matched_bits, 392)
         self.assertGreaterEqual(screen.classical_attack.work_bits, 128.0)
-        self.assertEqual(screen.quantum_attack.grover_query_bits, 128.0)
+        # Quantum work is the min of naive Grover and quantum ISD; both must
+        # clear 128 bits for a true PQ bound.
+        self.assertGreaterEqual(screen.quantum_attack.grover_query_bits, 128.0)
+        self.assertGreaterEqual(screen.quantum_attack.quantum_isd_bits, 128.0)
         self.assertGreaterEqual(screen.expected_solutions_bits, 4.0)
 
     def test_old_toy_research_profile_does_not_pass(self):
