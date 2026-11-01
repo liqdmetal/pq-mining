@@ -22,7 +22,7 @@ require miners to use the walk.
 ## Reproduction
 
 ```text
-cd C:/Users/officeone/pq-mining
+cd <repo>
 python -c "from pqmine.codebased import SDPParameters; from pqmine.latency_bound import LatencyParameters; from pqmine.restricted_work import composite_attack; s=SDPParameters(n=512,k=256,weight=32); w=LatencyParameters(arena_bits=8,steps=400,write_density=1,cell_bytes=8); print(composite_attack(b'recommended-attack-audit',s,w,matched_bits=164,w_max=32,nonces=256,target_weight=32).summary())"
 ```
 

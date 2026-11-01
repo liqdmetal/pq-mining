@@ -25,7 +25,7 @@ external network, or GPU allocation.
 
 ## Run the in-process smoke harness
 
-From `C:/Users/officeone/pq-mining`:
+From `<repo>`:
 
 ```text
 python tools/run_loopback_testnet.py --blocks 3 --max-nonces 128 --matched-bits 8

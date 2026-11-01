@@ -21,7 +21,7 @@ It no longer audits the obsolete all-steps walk.
 ## Reproduction
 
 ```text
-cd C:/Users/officeone/pq-mining
+cd <repo>
 python -m pytest tests/test_restriction_trace.py -q
 ```
 

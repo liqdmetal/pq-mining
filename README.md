@@ -1,7 +1,16 @@
 # Chitin-PoW — research-only code-based PoW experiment
 
-**Status:** private research repository. No deployment, network, wallet keys,
+**Status:** research repository. No deployment, network, wallet keys,
 real balances, consensus integration, or certified security level.
+
+## Lineage
+
+This is the **current PoW research track** of the Chitin family. The older
+confidential-transactions lab lives in
+[`chitin-pqct`](https://github.com/liqdmetal/chitin-pqct). The chain-side
+integration of this verifier (header v4, difficulty floor, `PQ_MAX_WEIGHT=32`
+matching the golden vectors here) is maintained out-of-band; feed only what
+these specs and vectors pin.
 
 ## Current design: option 2
 
@@ -68,14 +77,14 @@ reference solver, and exercises real block validation plus HTTP broadcast. See
 ## Verification
 
 ```text
-cd C:/Users/officeone/pq-mining
+cd <repo>
 python -m pytest tests/ -q
 ```
 
 Latest verified local result: see the current `pytest` run; historical counts are not security evidence.
 
-The current restriction-audit record is `docs/RESTRICTION_AUDIT.md`; the
-current option-2 specification is `docs/POW_SPEC.md`.
+See `docs/RESTRICTION_AUDIT.md`; the current option-2 specification is
+`docs/POW_SPEC.md`. Questions best answered in `FAQ.md`.
 
 ## What remains before any deployment discussion
 
