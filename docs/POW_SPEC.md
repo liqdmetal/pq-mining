@@ -276,7 +276,7 @@ Known qualitative facts only:
 ## 10. Reproduce
 
 ```
-python -m pytest tests/ -q                       # currently 148 tests + 8 subtests
+python -m pytest tests/ -q                       # full suite (adversarial verifier suite included)
 python -c "from pqmine.calibration import *; ..."  # §5 numbers
 python -c "from pqmine.fraction_test import fraction_report; fraction_report(2048)"  # §6
 ```

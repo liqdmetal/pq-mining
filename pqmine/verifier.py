@@ -77,7 +77,10 @@ def _instance_prefix(header: bytes, nonce: int) -> bytes:
     """Canonical instance binding for one header/nonce pair."""
     if not isinstance(header, bytes) or not header:
         raise ShareError("header must be non-empty bytes")
-    if not (0 <= nonce < 2**64):
+    # Strict fail-closed: bool is an int in Python, and a float/str nonce
+    # would crash later on .to_bytes — the consensus boundary must reject,
+    # never raise an unpredicted exception.
+    if not isinstance(nonce, int) or isinstance(nonce, bool) or not (0 <= nonce < 2**64):
         raise ShareError("nonce must be a uint64")
     return (len(header).to_bytes(4, "big") + header
             + nonce.to_bytes(8, "big"))
@@ -174,7 +177,7 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
     try:
         columns = derive_columns(share.header, params, share.nonce)
         target = derive_target(share.header, params, share.nonce)
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, AttributeError):
         return Verdict(False, "malformed header or nonce", len(support), 0)
 
     acc = 0
