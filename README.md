@@ -8,7 +8,7 @@ real balances, consensus integration, or certified security level.
 This is the **current PoW research track** of the Chitin family. The older
 confidential-transactions lab lives in
 [`chitin-pqct`](https://github.com/liqdmetal/chitin-pqct). The chain-side
-integration of this verifier (header v4, difficulty floor, `PQ_MAX_WEIGHT=32`
+integration of this verifier (versioned proof language, `PQ_MAX_WEIGHT=32`
 matching the golden vectors here) is maintained out-of-band; feed only what
 these specs and vectors pin.
 
@@ -27,8 +27,10 @@ verifier:
 
 The verifier accepts a share only when the support is non-empty, distinct,
 in-range, within `w_max`, and its XOR matches the target on the matched bits.
-The nonce binding is consensus-critical: replaying a support at another nonce
-must fail.
+The nonce binding is consensus-critical: changing a nonce derives a new
+instance and requires rechecking (at low difficulty accidental matches remain
+possible). Mathematical support order is irrelevant; the fixed-profile wire
+codec requires strictly ascending indices. See [wire corpus](docs/WIRE_CORPUS.md).
 
 ## Security status
 
@@ -44,7 +46,9 @@ support question remains open even though the current toy audit found no gross
 column bias, syndrome concentration, effective-weight collapse, or nonce-path
 convergence.
 
-The measured hardware result is GPU-favoured, not CPU-favoured. This project
+Synthetic per-unit measurements and linear projections favour GPUs. They do
+not establish a whole-chip ratio or an upper bound on hardware advantage.
+The verifier does not require the reference walk. This project
 does not claim ASIC-proof, FPGA-proof, CPU-only, or equal CPU/GPU mining.
 
 ## Search implementations
@@ -60,6 +64,8 @@ does not claim ASIC-proof, FPGA-proof, CPU-only, or equal CPU/GPU mining.
 - `pqmine/partial_isd.py`: bounded CPU reference partial-syndrome solver; toy-validated, not a production solver.
 - `pqmine/bdd_attack.py`: symbolic multi-partition attack family; not a complete BDD/ISD implementation.
 - `pqmine/verifier.py`: consensus-rule reference implementation.
+- `tests/consensus_vectors_v1.json`: versioned 512/256/32 derivation, math,
+  canonical wire, and malformed-input corpus for Python/Rust parity.
 - `pqmine/testnet.py`: loopback-only block/chain/node PoC; not DERO or production.
 
 ## Loopback testnet PoC
@@ -106,3 +112,8 @@ See `docs/RESTRICTION_AUDIT.md`; the current option-2 specification is
 
 Passing tests demonstrate exercised behavior only. They do not establish
 post-quantum security, ASIC resistance, or production readiness.
+
+`quantum_work.py` reports generic oracle queries separately from the
+Kachigar–Tillich asymptotic exponent extrapolation. Neither certifies a
+finite-instance security floor. The n=2304 candidate remains unapproved;
+`passes_numeric_screen` is bookkeeping, and `passes_modeled_floor` is false.

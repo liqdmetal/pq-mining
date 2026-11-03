@@ -1,6 +1,8 @@
 """Reference search must produce the same object the verifier accepts."""
 
 import unittest
+import time
+from unittest.mock import patch
 
 from pqmine.decoupled import selection_threshold
 from pqmine.latency_bound import LatencyParameters
@@ -120,6 +122,46 @@ class ReferenceSearchTests(unittest.TestCase):
             search_reference(
                 b"x", self.pow, self.walk, target_weight=4, max_nonces=0,
             )
+
+    def test_deadline_and_cancellation_stop_before_allocating(self):
+        for kwargs, reason in (({"deadline": time.monotonic() - 1}, "deadline"),
+                               ({"cancelled": lambda: True}, "cancelled")):
+            with patch("pqmine.search_share.derive_instance") as derive:
+                result = search_reference(b"x", self.pow, self.walk, target_weight=4, **kwargs)
+                self.assertFalse(result.found)
+                self.assertEqual(result.nonces_tested, 0)
+                self.assertEqual(result.stop_reason, reason)
+                derive.assert_not_called()
+
+    def test_cancellation_during_walk_is_inconclusive(self):
+        checks = 0
+        def cancelled():
+            nonlocal checks
+            checks += 1
+            return checks >= 3
+        result = search_reference(b"x", self.pow, self.walk, target_weight=4,
+                                  cancelled=cancelled)
+        self.assertEqual(result.stop_reason, "cancelled")
+        self.assertEqual(result.nonces_tested, 0)
+
+    def test_resource_envelope_rejects_before_work(self):
+        for kwargs in ({"max_arena_bytes": 1}, {"max_steps_per_nonce": 1},
+                       {"max_columns": 1}, {"max_nonces": True},
+                       {"first_nonce": True}, {"target_weight": True},
+                       {"deadline": float("inf")}, {"cancelled": False},
+                       {"max_rehashes_per_step": 0}):
+            options = {"target_weight": 4, **kwargs}
+            with self.assertRaises(SearchShareError):
+                search_reference(b"x", self.pow, self.walk, **options)
+
+    def test_collision_cycle_has_a_hard_bound(self):
+        from pqmine.decoupled_trace import WalkInterrupted, trace_decoupled_walk
+        from pqmine.latency_bound import build_arena
+        with patch("pqmine.decoupled_trace.mix64", return_value=0):
+            with self.assertRaisesRegex(WalkInterrupted, "collision_budget"):
+                trace_decoupled_walk(build_arena(b"x", self.walk), 0,
+                                     self.walk, tuple(range(64)), 4,
+                                     max_rehashes_per_step=3)
 
 
 if __name__ == "__main__":

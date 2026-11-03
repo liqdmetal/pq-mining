@@ -1,9 +1,9 @@
-"""Explicit PoW parameter profiles and conservative attack gates.
+"""Explicit research profiles and noncertifying symbolic attack screens.
 
 Profiles are engineering candidates, not security claims. A profile is only
-"screen-passing" when it clears the currently implemented symbolic classical
-MITM and generic Grover-query models. Quantum ISD, gate-level resources,
-structured-support attacks, and external review remain outside this gate.
+"numerically screened" when it clears the implemented symbolic calculations.
+Attack-cost upper bounds cannot establish a security lower bound. Quantum ISD
+finite-instance costs, gate-level resources and external review remain open.
 """
 
 from __future__ import annotations
@@ -29,10 +29,16 @@ class ProfileScreen:
 
     @property
     def passes_modeled_floor(self) -> bool:
+        """Compatibility API: no implemented model establishes a security floor."""
+        return False
+
+    @property
+    def passes_numeric_screen(self) -> bool:
         return (
             self.expected_solutions_bits >= 4.0
             and self.classical_attack.work_bits >= self.classical_floor_bits
             and self.quantum_attack.grover_query_bits >= self.quantum_floor_bits
+            and self.quantum_attack.quantum_isd_bits >= self.quantum_floor_bits
         )
 
     def summary(self) -> dict:
@@ -54,13 +60,17 @@ class ProfileScreen:
             "quantum_grover_query_bits": round(
                 self.quantum_attack.grover_query_bits, 6,
             ),
-            "quantum_isd_bits": round(
+            "quantum_isd_asymptotic_extrapolation_bits": round(
                 self.quantum_attack.quantum_isd_bits, 6,
             ),
             "passes_current_modeled_floor": self.passes_modeled_floor,
+            "passes_numeric_screen": self.passes_numeric_screen,
+            "security_floor_established": False,
+            "status": "research-only-unapproved",
             "warning": (
-                "candidate only; not a PQ security claim. Quantum ISD, gate-level "
-                "resources, structured-support attacks, and external review remain."
+                "candidate only; not a PQ security claim. A numeric screen of "
+                "attack upper bounds and asymptotic extrapolations cannot prove "
+                "a finite-instance security floor. Concrete ISD and review remain."
             ),
         }
 
@@ -103,14 +113,11 @@ def screen_profile(
 
 
 def candidate_128_profile() -> ProfileScreen:
-    """Return a profile passing the current 128-bit modeled screens.
+    """Historical name for the unapproved n=2304 research candidate.
 
-    The naive-Grover model (2^(t/2)) is NOT a conservative PQ bound: the
-    best known quantum attack on the underlying syndrome-decoding problem is
-    quantum ISD (Kachigar-Tillich, 2^(0.05869 n)). To clear a 128-bit
-    quantum floor under that bound the code length must satisfy
-    0.05869 * n >= 128, i.e. n >= 2181. n=2304 gives ~135 bits of quantum
-    margin and ~197 bits of classical MITM margin at w_max=60.
+    The name expresses an investigation target, not achieved 128-bit security.
+    In particular 0.05869*n is not a finite-instance security certificate and
+    crossing 128 in that extrapolation does not approve a parameter profile.
     """
     params = PoWParams(
         n_columns=2304,
@@ -118,7 +125,7 @@ def candidate_128_profile() -> ProfileScreen:
         w_max=60,
         matched_bits=392,
     )
-    return screen_profile("candidate-128-modeled-floor", params)
+    return screen_profile("candidate-2304-unreviewed", params)
 
 
 __all__ = [

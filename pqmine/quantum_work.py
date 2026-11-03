@@ -1,4 +1,4 @@
-"""Conservative quantum query accounting for the bounded PoW language.
+"""Symbolic quantum query accounting for the bounded PoW language.
 
 This is a generic amplitude-amplification model, not a quantum ISD
 implementation. It treats candidate-support generation and the verifier's
@@ -6,7 +6,7 @@ matched-prefix check as a coherent oracle. The result counts oracle queries
 only; it omits reversible SHAKE cost, qubits, QRAM, circuit depth, error
 correction, and implementation constants.
 
-The model is deliberately conservative for a PQ claim: a Grover search over a
+For comparison, a Grover search over a
 uniform candidate oracle has a quadratic query speedup over the 2**t random
 prefix-search cost, giving approximately 2**(t/2) queries in the satisfiable
 regime. Known quantum ISD algorithms may give a different or cheaper concrete
@@ -21,14 +21,11 @@ from dataclasses import dataclass
 
 from .calibration import log2_binom
 
-# Quantum ISD exponent (Kachigar & Tillich, "Quantum Information Set
-# Decoding Algorithms", PQCrypto 2017): the best known quantum attack on
-# syndrome decoding runs in 2^(0.05869 n) for code length n. This is the
-# codebase's own documented exponent (see codebased.QUANTUM_EXPONENTS).
-# A naive Grover search over the candidate space (2^(t/2)) is NOT a
-# conservative PQ bound: quantum ISD exploits the code structure and is
-# far cheaper for large n. The attacker uses whichever route is cheaper,
-# so the modeled quantum work must be the MINIMUM of the two.
+# Kachigar--Tillich (https://arxiv.org/abs/1703.00263v2) report this
+# worst-case asymptotic exponent in their decoding regime. Multiplication by
+# our finite n ignores rate/weight/prefix-regime assumptions, polynomial
+# factors and quantum resources. It is an illustrative extrapolation, NOT a
+# concrete attack cost or a lower bound certifying security for these shares.
 QUANTUM_ISD_EXPONENT = 0.05869
 
 
@@ -42,11 +39,9 @@ class QuantumAttack:
 
     ``naive_grover_query_bits`` is the pure amplitude-amplification query
     count (t/2) over the uniform candidate oracle. ``grover_query_bits`` is
-    the *modeled* quantum work: the minimum of the naive Grover count and
-    the quantum-ISD bound (0.05869 * n), because the attacker uses whichever
-    route is cheaper. For a true post-quantum security claim the binding
-    quantity is ``grover_query_bits`` (the min), and it must clear the target
-    floor. The naive Grover count alone is NOT a conservative PQ bound.
+    the same query-only quantity, not a security floor. The legacy field
+    ``quantum_isd_bits`` contains an asymptotic extrapolation for comparison
+    only; it must not be combined with finite-instance costs or certified.
     """
 
     n: int
@@ -69,12 +64,15 @@ class QuantumAttack:
             "expected_solutions_bits": round(self.expected_solutions_bits, 6),
             "naive_grover_query_bits": round(self.naive_grover_query_bits, 6),
             "grover_query_bits": round(self.grover_query_bits, 6),
-            "quantum_isd_bits": round(self.quantum_isd_bits, 6),
+            "quantum_isd_asymptotic_extrapolation_bits": round(self.quantum_isd_bits, 6),
+            "finite_instance_quantum_security_bits": None,
+            "security_floor_established": False,
             "satisfiable_regime": self.satisfiable_regime,
             "model": self.model,
             "warning": (
-                "quantum oracle-query accounting only; no gate, qubit, QRAM, "
-                "fault-tolerance, or quantum-ISD estimate"
+                "not a PQ security claim; generic oracle-query accounting and "
+                "an asymptotic ISD extrapolation, not a finite-instance attack "
+                "estimate or security lower bound; no gate/qubit/QRAM model"
             ),
         }
 
@@ -115,13 +113,9 @@ def grover_bounded_support_work(
     # In the intended satisfiable regime, N candidates with N/2^t expected
     # marked items require sqrt(N/(N/2^t)) = 2^(t/2) oracle queries.
     naive_grover_query_bits = matched_bits / 2.0
-    # Quantum ISD (Kachigar-Tillich) is the best known quantum attack on the
-    # underlying syndrome-decoding problem and is far cheaper than naive
-    # Grover for large n. The attacker uses whichever route is cheaper, so
-    # the modeled quantum work is the minimum of the two. This is what makes
-    # the model conservative for a PQ claim.
+    # Display separately: this asymptotic extrapolation is not in the same
+    # calibrated finite-instance cost model as the generic oracle queries.
     quantum_isd_bits = QUANTUM_ISD_EXPONENT * n
-    modeled_quantum_bits = min(naive_grover_query_bits, quantum_isd_bits)
     return QuantumAttack(
         n=n,
         max_weight=max_weight,
@@ -129,7 +123,7 @@ def grover_bounded_support_work(
         candidate_space_bits=candidate_space_bits,
         expected_solutions_bits=expected_solutions_bits,
         naive_grover_query_bits=naive_grover_query_bits,
-        grover_query_bits=modeled_quantum_bits,
+        grover_query_bits=naive_grover_query_bits,
         quantum_isd_bits=quantum_isd_bits,
         satisfiable_regime=expected_solutions_bits >= 0.0,
     )
@@ -142,11 +136,10 @@ def best_modeled_quantum_work(
     matched_bits: int,
     classical_attack_bits: float,
 ) -> dict:
-    """Compare classical MITM work with the modeled quantum work.
+    """Compare symbolic routes, displaying asymptotic ISD separately.
 
-    The modeled quantum work is the minimum of the naive Grover query count
-    (2^(t/2)) and the quantum-ISD bound (2^(0.05869 n), Kachigar-Tillich),
-    since the attacker uses whichever route is cheaper.
+    Query counts omit oracle implementation cost. Even their minimum is not
+    a certified finite-instance quantum security level.
     """
     attack = grover_bounded_support_work(
         n, max_weight, matched_bits, syndrome_bits=syndrome_bits,
@@ -156,7 +149,8 @@ def best_modeled_quantum_work(
         "classical_attack_bits": round(float(classical_attack_bits), 6),
         "naive_grover_query_bits": round(attack.naive_grover_query_bits, 6),
         "grover_query_bits": round(attack.grover_query_bits, 6),
-        "quantum_isd_bits": round(attack.quantum_isd_bits, 6),
+        "quantum_isd_asymptotic_extrapolation_bits": round(attack.quantum_isd_bits, 6),
+        "security_floor_established": False,
         "best_modeled_quantum_work_bits": round(best, 6),
         "selected_route": (
             "generic-grover" if attack.grover_query_bits <= classical_attack_bits
@@ -164,8 +158,8 @@ def best_modeled_quantum_work(
         ),
         "satisfiable_regime": attack.satisfiable_regime,
         "warning": (
-            "not a PQ security claim; oracle-query model only, with gate-level "
-            "resource estimates unresolved"
+            "not a PQ security claim; symbolic query counts only; asymptotic "
+            "ISD extrapolation is not a finite-instance cost or security floor"
         ),
     }
 

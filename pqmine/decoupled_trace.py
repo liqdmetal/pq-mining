@@ -12,11 +12,16 @@ It is intentionally slow and not a production miner.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from .decoupled import selection_threshold
 from .latency_bound import LatencyParameters
 
 _MASK64 = (1 << 64) - 1
+
+
+class WalkInterrupted(ValueError):
+    """Reference walk stopped without a completed witness."""
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,9 @@ def trace_decoupled_walk(
     params: LatencyParameters,
     columns: tuple[int, ...],
     target_weight: int,
+    *,
+    stop_reason: Callable[[], str | None] | None = None,
+    max_rehashes_per_step: int = 4096,
 ) -> DecoupledTrace:
     """Trace the exact selector/state transition used by ``decoupled.py``."""
     if not (0 <= nonce < 2**64):
@@ -60,6 +68,8 @@ def trace_decoupled_walk(
         raise ValueError("target_weight cannot exceed available columns")
     if len(arena) != params.arena_bytes:
         raise ValueError("arena size does not match latency parameters")
+    if type(max_rehashes_per_step) is not int or max_rehashes_per_step <= 0:
+        raise ValueError("max_rehashes_per_step must be a positive integer")
 
     cell_bytes = params.cell_bytes
     mask = params.cells - 1
@@ -71,6 +81,10 @@ def trace_decoupled_walk(
     used: set[int] = set()
 
     for step in range(params.steps):
+        if stop_reason is not None and step % 64 == 0:
+            reason = stop_reason()
+            if reason is not None:
+                raise WalkInterrupted(reason)
         offset = address * cell_bytes
         value = int.from_bytes(arena[offset:offset + 8], "little")
         x = mix64(value ^ nonce ^ step)
@@ -84,9 +98,17 @@ def trace_decoupled_walk(
                 continue
             y = x
             column = y % len(columns)
+            rehashes = 0
             while column in used:
+                if rehashes >= max_rehashes_per_step:
+                    raise WalkInterrupted("collision_budget")
+                if stop_reason is not None:
+                    reason = stop_reason()
+                    if reason is not None:
+                        raise WalkInterrupted(reason)
                 y = mix64(y)
                 column = y % len(columns)
+                rehashes += 1
             used.add(column)
             selected.append(column)
             syndrome ^= columns[column]
@@ -101,4 +123,4 @@ def trace_decoupled_walk(
     )
 
 
-__all__ = ["DecoupledTrace", "mix64", "trace_decoupled_walk"]
+__all__ = ["DecoupledTrace", "WalkInterrupted", "mix64", "trace_decoupled_walk"]

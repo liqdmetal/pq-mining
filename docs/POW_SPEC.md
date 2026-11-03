@@ -1,8 +1,8 @@
 # Chitin-PoW v2 — Specification (Option 2)
 
-**Status:** research specification. Parameters are fixed and justified by
-measurement below; nothing here is deployed. Every number is reproducible
-from `pqmine/` and its tests.
+**Status:** research specification. The fixed verifier profile is an experimental
+interoperability target, not a security certification. Historical measurements
+and symbolic calculations below have different scopes; neither approves deployment.
 
 ## 1. What this is
 
@@ -38,13 +38,12 @@ search implementation; only §4 is consensus.
 || cheap verification | **yes** | §4, `w_max` XORs |
 || bounded-weight accounting | **yes** | verifier accepts `1..w_max` |
 || ASIC-proof | **no** | any fixed function can be cast in silicon |
-|| **CPU-favoured** | **no** | §6 — GPU wins **4.5–16×**, measured |
+|| **CPU-favoured** | **not established** | §6 — synthetic per-unit measurements and projections |
 || certified security level | **no** | bounded MITM is only an attack upper bound |
 
-The honest one-line pitch: **a post-quantum PoW with a bounded, measured
-GPU advantage of ~5–8× at the recommended operating point.** That is in
-Ethash's territory and tamer than SHA-256's ASIC gap by orders of
-magnitude. It is not RandomX.
+A code-based PoW research experiment with unapproved security parameters.
+Synthetic per-unit benchmarks favour GPUs; no whole-chip hardware-advantage
+bound or production valid-share throughput is established.
 
 ## 3. Consensus parameters
 
@@ -90,9 +89,10 @@ Accept a share `(header, nonce, support)` iff:
 3. `⊕_{j∈support} H[:,j]` equals `s` on the top `t` bits.
 4. `H` and `s` are derived from the bound `(header, nonce)` instance (`SHAKE-256`), never supplied by the miner.
 
-Cost: ≤ 32 XORs of 256-bit words. **The K-step walk is never re-executed**
-— it is the search, not the proof. 11 adversarial tests including the
-duplicate-column forgery.
+Cost: at most 32 column SHAKE derivations, one target derivation, and 32
+256-bit XORs. The walk is never re-executed. Mathematical supports are
+order-independent; canonical CHITINPQ wire witnesses must be strictly ascending.
+See [wire corpus](WIRE_CORPUS.md) for the exact codec and fixed-profile parity cases.
 
 ## 5. Difficulty — `pqmine/calibration.py`
 
@@ -148,82 +148,62 @@ certified security level is assigned until a coding theorist reviews the model.
 
 ### Quantum accounting boundary
 
-`pqmine/quantum_work.py` records a conservative generic amplitude-amplification
-model over the accepted bounded-support language. At the recommended profile,
-`matched_bits=164` gives **82.000 quantum oracle-query bits** (`t/2`) versus
-**82.446 classical MITM work bits**. This means the current parameters do not
-support a 128-bit post-quantum claim.
+`pqmine/quantum_work.py` reports generic amplitude-amplification oracle-query
+counts separately from asymptotic ISD extrapolations. At t=164 the generic
+query count is 82 bits; this excludes reversible SHAKE, circuit depth,
+qubits, QRAM, fault tolerance and constants, and is not a security level.
 
-This is **not** a gate-level quantum ISD estimate. It excludes reversible
-SHAKE cost, qubit count, QRAM, circuit depth, error correction, and the
-quantum-walk ISD algorithms studied by Kachigar--Tillich (arXiv:1703.00263).
-Those algorithms can produce different concrete costs. The 82.000 number is a
-modeled quantum attack ceiling, not a measured attack and not a security level.
+[Kachigar–Tillich](https://arxiv.org/abs/1703.00263v2) report a worst-case
+asymptotic exponent 0.05869n in their decoding regime. Substituting n=512
+produces 30.049 numerically, but does not establish a concrete 30-bit attack
+or a finite-instance security lower bound for our weight/prefix parameters.
+The applicability and cost of concrete quantum ISD remain open.
 
-### Candidate 128-bit modeled-floor profile — not approved
+### Candidate n=2304 profile — unapproved
 
-A separate candidate profile is available in `pqmine/profiles.py`:
+`candidate_128_profile()` is a historical API name for an investigation
+candidate: n=2304, syndrome_bits=1152, w_max=60, matched_bits=392. The name
+expresses a target, not achieved security. Increasing n until 0.05869n
+exceeds 128 cannot certify a 128-bit floor; attack upper bounds never prove
+security lower bounds. `passes_numeric_screen` only compares symbolic
+numbers; `passes_modeled_floor` and `security_floor_established` are false.
 
-```text
-n_columns=512, syndrome_bits=256, w_max=60, matched_bits=256
-expected accepted solutions: 2^6.879
-best tested classical MITM: 128.280 bits (cut 248, weight 59)
-naive Grover query model: 128.000 bits (t/2)
-quantum ISD bound (0.05869*n): 30.049 bits  <-- BINDING
-```
+No candidate parameters are promoted into the fixed 512/256/32 corpus.
+Concrete attacks, quantum resource analysis, implementation review, and
+independent cryptanalysis are required. Print the research report with
+`python tools/show_profile.py`; do not use it as a live mining configuration.
 
-This profile passes only the current *classical* symbolic screen. It is
-**not** 128-bit PQ-secure: the quantum ISD bound (Kachigar–Tillich,
-`0.05869 * n = 30.049` bits at n=512) is the binding quantum constraint and
-is far below 128 bits. The naive Grover count (t/2 = 128) is **not** a
-conservative PQ bound because quantum ISD exploits the code structure and is
-cheaper. To clear a 128-bit quantum floor under the ISD bound the code length
-must satisfy `0.05869 * n >= 128`, i.e. `n >= 2181`. The repository's
-`candidate_128_profile()` therefore uses `n=2304, syndrome=1152, w_max=60,
-matched_bits=392`, giving ~135 quantum bits and ~197 classical MITM bits.
-Gate-level resources, concrete memory/time, implementation security, and
-independent coding-theory review are still missing. The loopback testnet
-continues using toy parameters by default.
-
-The profile can be printed with:
-
-```text
-python tools/show_profile.py
-```
-
-It must not be used as a live mining configuration.
-
-## 6. Hardware profile — measured, not asserted
+## 6. Hardware profile — measured units and projected chips
 
 All numbers from the 5900X (12C/24T) + RTX 3090, via the **fraction test**
 (`pqmine/fraction_test.py`): 1 CPU core vs 1 fully-occupied SM, scaled
-linearly to each chip. Linear scaling ignores shared-memory contention on
-both sides, so it is an **upper bound on the GPU** — conservative in the
-CPU's favour.
+linearly to each chip. The ratio is a projection, not a measured whole-chip
+ratio or upper bound. Even two absolute throughput upper bounds do not bound
+their ratio. Contention, clocks, occupancy and power differ between devices.
+These synthetic kernels are not complete canonical valid-share miners.
 
-| K (walk length) | 1 core vs 1 SM | chip bound (82 SM / 12 core) |
+| K (walk length) | 1 core vs 1 SM | chip projection (82 SM / 12 core) |
 |---|---|---|
 | 1024 | SM 2.39× | **16.3× GPU** |
 | 2048 | SM 1.23× | 8.4× |
 | 8192 | SM 1.15× | **7.9× GPU** |
 
-Long chains narrow the per-unit gap toward parity but the SM never falls
-below the core, and 82 vs 12 units keeps the chip GPU-favoured.
+These samples narrow the per-unit gap with longer chains. Extrapolated
+chip rates favour the GPU for the listed configurations; other hardware,
+software or solver choices have not been bounded.
 
-**Recommended `K ≥ 2048`** → GPU advantage ~8×.
+At K ≥ 2048 these historical per-unit measurements project roughly 8×.
+This is not a guaranteed hardware advantage or evidence that the walk is
+required: arbitrary search algorithms are accepted by the verifier.
 
-### Why not CPU-favoured (and what would be)
-Two things were tried and measured. **Latency-bound pointer chasing**
-(PoSME): a single GPU thread is 9.9× *slower* than a core — confirmed —
-but mining runs one chain per nonce, nonces are independent, and 16k GPU
-threads amortise the latency away. PoSME's headline is correct and
-irrelevant to PoW. **Per-nonce mutable scratchpad**: the CPU wins 2–3×
-**only when the working set fits L1**; past L2 both spill to DRAM and GPU
-bandwidth wins. Mutation + L1-fit is the CPU lever (this is *why* RandomX
-sizes its hot scratchpad to L1), and it gives ~1.5× per unit here — far
-short of the ~6.8× needed to overcome the unit-count deficit. Reaching
-CPU-only requires RandomX's random-program VM, which abandons the PQ
-assumption in the PoW. Option 2 keeps the assumption and accepts the GPU.
+### CPU-favour was not established
+
+The earlier pointer-chasing and per-nonce scratchpad experiments did not
+establish CPU-favour for this design. Serial steps within a nonce do not
+prevent GPUs from processing independent nonces concurrently. Cache-fitting
+microbenchmarks do not establish the economics of complete miners. No
+claim is made that a particular VM is necessary or sufficient for CPU-favour,
+nor that the optional walk enforces a hardware cost on every accepted share.
 
 ## 7. Search procedure (non-consensus) — `pqmine/decoupled.py`
 
@@ -269,9 +249,10 @@ Known qualitative facts only:
   convenience can weaken the instance. This is the item that could sink the
   design.
 - Verifier-side `w_max` versus the walk's observed max-weight tail (§7).
-- No network, no difficulty-adjustment controller, no chain integration.
-- Only one paper on code-based PoW exists (ePrint 2026/1526, preliminary).
-  This is a first implementation, not adoption of proven technology.
+- Only an isolated loopback harness and research difficulty controller; no
+  production network or calibrated consensus deployment is established here.
+- The research construction needs current independent literature and attack
+  review; no novelty or completeness claim is made by this artifact.
 
 ## 10. Reproduce
 

@@ -17,9 +17,11 @@ solver, or evidence that the restricted walk is cryptographically sound.
 from __future__ import annotations
 
 import time
+import math
 from dataclasses import dataclass
+from typing import Callable
 
-from .decoupled_trace import trace_decoupled_walk
+from .decoupled_trace import WalkInterrupted, trace_decoupled_walk
 from .latency_bound import LatencyParameters, build_arena
 from .verifier import (
     PoWParams,
@@ -44,6 +46,7 @@ class ReferenceSearchResult:
     steps_per_nonce: int
     selected_weight: int
     seconds: float
+    stop_reason: str = "nonce_budget"
 
     @property
     def found(self) -> bool:
@@ -56,6 +59,7 @@ class ReferenceSearchResult:
             "steps_per_nonce": self.steps_per_nonce,
             "selected_weight": self.selected_weight,
             "seconds": round(self.seconds, 6),
+            "stop_reason": self.stop_reason,
             "verdict": self.verdict.reason if self.verdict else "not found",
         }
 
@@ -66,6 +70,8 @@ def _search_nonce(
     pow_params: PoWParams,
     latency_params: LatencyParameters,
     target_weight: int,
+    stop_reason: Callable[[], str | None] | None = None,
+    max_rehashes_per_step: int = 4096,
 ) -> tuple[Share | None, int]:
     """Run one decoupled walk and return a verifier-compatible support."""
     if len(header) == 0:
@@ -78,10 +84,15 @@ def _search_nonce(
         raise SearchShareError("target_weight cannot exceed available columns")
 
     columns, target = derive_instance(header, pow_params, nonce)
+    if stop_reason is not None and (reason := stop_reason()) is not None:
+        raise WalkInterrupted(reason)
     trace = trace_decoupled_walk(
         build_arena(header, latency_params), nonce, latency_params,
         columns, target_weight,
+        stop_reason=stop_reason, max_rehashes_per_step=max_rehashes_per_step,
     )
+    if stop_reason is not None and (reason := stop_reason()) is not None:
+        raise WalkInterrupted(reason)
     if trace.weight > pow_params.w_max:
         return None, trace.weight
 
@@ -102,29 +113,73 @@ def search_reference(
     target_weight: int,
     first_nonce: int = 0,
     max_nonces: int = 256,
+    deadline: float | None = None,
+    cancelled: Callable[[], bool] | None = None,
+    max_arena_bytes: int = 64 * 1024 * 1024,
+    max_steps_per_nonce: int = 1_000_000,
+    max_columns: int = 65536,
+    max_rehashes_per_step: int = 4096,
 ) -> ReferenceSearchResult:
     """Search consecutive nonces and return a real, self-verified ``Share``.
 
     Use tiny ``matched_bits`` and a bounded nonce count in tests.  At chain
     difficulty the expected search is intentionally expensive; this function
-    must not be called as a production miner.
+    must not be called as a production miner. ``deadline`` is an absolute
+    ``time.monotonic()`` value; cancellation is cooperative between phases
+    and every 64 walk steps (also inside collision retries). One SHAKE/arena
+    allocation cannot be interrupted; explicit arena/column limits bound it.
+    Exhausted/interrupted results are inconclusive, never invalidity proofs.
     """
-    if max_nonces <= 0:
+    if type(max_nonces) is not int or max_nonces <= 0:
         raise SearchShareError("max_nonces must be positive")
-    if not (0 <= first_nonce < 2**64):
+    if type(first_nonce) is not int or not (0 <= first_nonce < 2**64):
         raise SearchShareError("first_nonce must be a uint64")
+    if type(header) is not bytes or not header:
+        raise SearchShareError("header must be non-empty bytes")
+    if type(target_weight) is not int or not 0 < target_weight <= min(
+        latency_params.steps, pow_params.n_columns,
+    ):
+        raise SearchShareError("target_weight must fit steps and available columns")
+    for value in (max_arena_bytes, max_steps_per_nonce, max_columns, max_rehashes_per_step):
+        if type(value) is not int or value <= 0:
+            raise SearchShareError("resource limits must be positive integers")
+    if (latency_params.arena_bytes > max_arena_bytes
+            or latency_params.steps > max_steps_per_nonce or pow_params.n_columns > max_columns):
+        raise SearchShareError("search exceeds the configured resource envelope")
+    if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
+        raise SearchShareError("deadline must be a finite monotonic timestamp")
+    if cancelled is not None and not callable(cancelled):
+        raise SearchShareError("cancelled must be callable")
+
+    def stop_reason() -> str | None:
+        if cancelled is not None and cancelled():
+            return "cancelled"
+        if deadline is not None and time.monotonic() >= deadline:
+            return "deadline"
+        return None
 
     started = time.perf_counter()
     last_weight = 0
     nonces_tested = 0
+    stopped = "nonce_budget"
     for offset in range(max_nonces):
+        reason = stop_reason()
+        if reason is not None:
+            stopped = reason
+            break
         nonce = first_nonce + offset
         if nonce >= 2**64:
+            stopped = "nonce_space"
             break
-        nonces_tested += 1
-        share, last_weight = _search_nonce(
-            header, nonce, pow_params, latency_params, target_weight,
-        )
+        try:
+            share, last_weight = _search_nonce(
+                header, nonce, pow_params, latency_params, target_weight,
+                stop_reason, max_rehashes_per_step,
+            )
+        except WalkInterrupted as exc:
+            stopped = str(exc)
+            break
+        nonces_tested += 1  # counts completed nonce attempts, not interrupted ones
         if share is not None:
             verdict = verify_share(share, pow_params)
             return ReferenceSearchResult(
@@ -134,6 +189,7 @@ def search_reference(
                 steps_per_nonce=latency_params.steps,
                 selected_weight=last_weight,
                 seconds=time.perf_counter() - started,
+                stop_reason="found",
             )
     return ReferenceSearchResult(
         share=None,
@@ -142,6 +198,7 @@ def search_reference(
         steps_per_nonce=latency_params.steps,
         selected_weight=last_weight,
         seconds=time.perf_counter() - started,
+        stop_reason=stopped,
     )
 
 

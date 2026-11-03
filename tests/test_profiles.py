@@ -7,14 +7,14 @@ from pqmine.verifier import PoWParams
 
 
 class ProfileScreenTests(unittest.TestCase):
-    def test_candidate_profile_clears_current_modeled_floor(self):
+    def test_numeric_screen_never_certifies_candidate_security(self):
         screen = candidate_128_profile()
-        self.assertTrue(screen.passes_modeled_floor, screen.summary())
+        self.assertTrue(screen.passes_numeric_screen, screen.summary())
+        self.assertFalse(screen.passes_modeled_floor, screen.summary())
         self.assertEqual(screen.params.w_max, 60)
         self.assertEqual(screen.params.matched_bits, 392)
         self.assertGreaterEqual(screen.classical_attack.work_bits, 128.0)
-        # Quantum work is the min of naive Grover and quantum ISD; both must
-        # clear 128 bits for a true PQ bound.
+        # Large symbolic numbers do not prove a security lower bound.
         self.assertGreaterEqual(screen.quantum_attack.grover_query_bits, 128.0)
         self.assertGreaterEqual(screen.quantum_attack.quantum_isd_bits, 128.0)
         self.assertGreaterEqual(screen.expected_solutions_bits, 4.0)
@@ -30,7 +30,10 @@ class ProfileScreenTests(unittest.TestCase):
 
     def test_summary_exposes_nonclaims(self):
         summary = candidate_128_profile().summary()
-        self.assertTrue(summary["passes_current_modeled_floor"])
+        self.assertFalse(summary["passes_current_modeled_floor"])
+        self.assertTrue(summary["passes_numeric_screen"])
+        self.assertFalse(summary["security_floor_established"])
+        self.assertEqual(summary["status"], "research-only-unapproved")
         self.assertIn("not a PQ security claim", summary["warning"])
 
 

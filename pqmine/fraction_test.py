@@ -23,20 +23,14 @@ resident-thread capacity (1024 threads on Ampere), each running its own
 chain. That is a real 1/82 of the GPU, the same way one core is 1/12 of
 the CPU.
 
-WHY THE SCALING IS HONEST (and where it is not)
------------------------------------------------
-Per-SM to chip scaling is close to linear for this workload because
-chains are independent and each SM has its own L1/shared memory: an SM's
-throughput does not depend on what other SMs do. The one place linear
-scaling overstates the GPU is shared resources -- the L2 and the memory
-controllers -- which all SMs contend for. So 82x per-SM is an UPPER
-bound on the real chip figure, i.e. the fraction test is conservative
-in the CPU's favour by construction. Reported as a bound, not a point.
-
-Per-core to chip scaling for the CPU is similarly an upper bound: 12
-cores contend for the shared L3 and memory bus. Both sides scale the same
-way, so the ratio is approximately right and each side's absolute is
-slightly high.
+SCALING LIMITS
+--------------
+The chip ratio is a linear extrapolation, not a measured whole-chip ratio
+or an upper bound on that ratio. Even if each device's absolute projection
+were an upper bound, dividing two upper bounds does not bound their ratio.
+Cache/memory contention, clocks, occupancy, power and the resident workload
+can affect the two devices differently. This synthetic benchmark also does
+not measure a complete miner emitting canonical verifier-valid witnesses.
 """
 
 from __future__ import annotations
@@ -163,25 +157,11 @@ def fraction_report(steps: int = 400) -> dict:
     core = one_core(steps)
     sm = one_sm(steps)
     per_unit_ratio = sm.chains_per_second / core.chains_per_second
-    chip_ratio_bound = (GPU_SMS * sm.chains_per_second) / (CPU_CORES * core.chains_per_second)
-
-    if chip_ratio_bound < 1.0:
-        verdict = (
-            f"CPU-FAVOURED: even scaling the GPU by all {GPU_SMS} SMs "
-            f"(an upper bound), it reaches only {chip_ratio_bound:.2f}x the "
-            f"{CPU_CORES}-core CPU. CPU wins by >= {1/chip_ratio_bound:.2f}x."
-        )
-    elif chip_ratio_bound < 2.0:
-        verdict = (
-            f"NEAR PARITY: GPU chip bound {chip_ratio_bound:.2f}x. Within the "
-            "GPU's power/cost premium; not a GPU coin."
-        )
-    else:
-        verdict = (
-            f"GPU-FAVOURED: chip bound {chip_ratio_bound:.2f}x. Even allowing "
-            "that this overstates the GPU (shared L2/memory contention), a "
-            "GPU coin at these parameters."
-        )
+    chip_ratio = (GPU_SMS * sm.chains_per_second) / (CPU_CORES * core.chains_per_second)
+    verdict = (
+        f"Linear extrapolation: {chip_ratio:.2f}x GPU/CPU; not a whole-chip "
+        "measurement, hardware advantage bound, or consensus-miner throughput result."
+    )
 
     return {
         "steps": steps,
@@ -191,11 +171,13 @@ def fraction_report(steps: int = 400) -> dict:
         "scaling": {
             "cpu_cores": CPU_CORES,
             "gpu_sms": GPU_SMS,
-            "chip_gpu_over_cpu_upper_bound": round(chip_ratio_bound, 3),
+            "chip_gpu_over_cpu_linear_projection": round(chip_ratio, 3),
+            "is_measured_whole_chip_ratio": False,
+            "is_hardware_advantage_bound": False,
             "note": (
                 "linear per-unit scaling ignores shared L2/memory contention "
-                "on both chips, so this is an upper bound on the GPU and the "
-                "true ratio is at or below it"
+                "on both chips; dividing projected rates does not bound the "
+                "actual ratio. Full valid-share benchmarks remain required"
             ),
         },
         "gpu_mib_touched": round(

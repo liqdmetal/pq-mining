@@ -17,7 +17,8 @@ verifier independently recomputes from the share alone:
      difficulty's matched-bit prefix); it is the whole proof of work.
   4. H and s are derived from the header, not supplied by the miner.
 
-Cost: |support| XORs of 64-bit words -- microseconds. Verification is
+Cost: |support| column SHAKE derivations, one target derivation, and
+|support| XORs. Verification is
 asymmetric with search by the nonce count (see spec), not the step count.
 
 The walk (K steps, scratchpad, chain) is NOT re-executed. It is the search
@@ -48,10 +49,14 @@ class PoWParams:
     matched_bits: int = 164        # DIFFICULTY: retargetable, <= syndrome_bits
 
     def __post_init__(self) -> None:
-        # syndrome_bits is capped at 4096 (64 words of 64 bits) to allow
-        # code lengths large enough for a true 128-bit post-quantum bound.
-        # Quantum ISD (Kachigar-Tillich, 2^(0.05869 n)) requires n >= 2181
-        # for 128 bits; at rate 1/2 that needs syndrome_bits >= 1091.
+        # Research parameter envelope, not a claimed security level. Larger
+        # n does not establish a finite-instance post-quantum security floor.
+        if any(type(value) is not int for value in (
+            self.n_columns, self.syndrome_bits, self.w_max, self.matched_bits,
+        )):
+            raise ShareError("parameters must be integers")
+        if not (1 < self.n_columns <= 2**32):
+            raise ShareError("n_columns must fit the uint32 column-index domain")
         if not (0 < self.matched_bits <= self.syndrome_bits <= 64 * 64):
             raise ShareError("matched_bits must be in (0, syndrome_bits]")
         if not (0 < self.w_max < self.n_columns):
@@ -62,7 +67,7 @@ class PoWParams:
 class Share:
     header: bytes
     nonce: int
-    support: tuple            # sorted distinct column indices
+    support: tuple            # mathematical set: order does not affect validity
 
 
 @dataclass(frozen=True)
@@ -90,13 +95,31 @@ def derive_columns(header: bytes, params: PoWParams, nonce: int = 0) -> tuple:
     """Parity-check columns from the bound header/nonce instance."""
     words = (params.syndrome_bits + 63) // 64
     prefix = _instance_prefix(header, nonce)
-    out = []
-    for j in range(params.n_columns):
-        digest = hashlib.shake_256(
-            b"CHITIN-POW-H-V2" + prefix + j.to_bytes(4, "big")
-        ).digest(8 * words)
-        out.append(int.from_bytes(digest, "big"))
-    return tuple(out)
+    return tuple(_derive_column(prefix, j, words) for j in range(params.n_columns))
+
+
+def _derive_column(prefix: bytes, index: int, words: int) -> int:
+    digest = hashlib.shake_256(
+        b"CHITIN-POW-H-V2" + prefix + index.to_bytes(4, "big")
+    ).digest(8 * words)
+    return int.from_bytes(digest, "big")
+
+
+def derive_selected_columns(
+    header: bytes, params: PoWParams, support: tuple | list, nonce: int = 0,
+) -> tuple[int, ...]:
+    """Derive only the requested columns, in the supplied order.
+
+    Bounded before allocation. This helper permits repeats for derivation;
+    ``verify_share`` separately rejects duplicate indices in a witness.
+    """
+    if not isinstance(support, (tuple, list)) or len(support) > params.w_max:
+        raise ShareError("selected columns exceed the bounded support envelope")
+    if any(type(j) is not int or not 0 <= j < params.n_columns for j in support):
+        raise ShareError("column index out of range or not an integer")
+    prefix = _instance_prefix(header, nonce)
+    words = (params.syndrome_bits + 63) // 64
+    return tuple(_derive_column(prefix, j, words) for j in support)
 
 
 def derive_target(header: bytes, params: PoWParams, nonce: int = 0) -> int:
@@ -128,7 +151,11 @@ _mask = syndrome_mask
 
 
 def verify_share(share: Share, params: PoWParams) -> Verdict:
-    """Rules (1)-(4). Never trusts anything the miner reported."""
+    """Mathematical rules (1)-(4); support order is irrelevant.
+
+    A network wire representation has additional canonical encoding rules.
+    Use ``decode_pq_witness`` for the fixed 512/256/32 CHITINPQ codec.
+    """
     # Reject oversized concrete containers before copying or hashing them. The
     # network payload has its own byte limit, but this function is also used as
     # a consensus boundary and must not allocate in proportion to an attacker-
@@ -175,14 +202,14 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
     # (4) Syndrome relation on the matched bits. H and s come from the
     # header/nonce instance, never from the submitted share.
     try:
-        columns = derive_columns(share.header, params, share.nonce)
+        columns = derive_selected_columns(share.header, params, support, share.nonce)
         target = derive_target(share.header, params, share.nonce)
     except (TypeError, ValueError, OverflowError, AttributeError):
         return Verdict(False, "malformed header or nonce", len(support), 0)
 
     acc = 0
-    for j in support:
-        acc ^= columns[j]
+    for column in columns:
+        acc ^= column
     mask = _mask(params)
     matched = (acc & mask) == (target & mask)
     matched_count = params.matched_bits if matched else 0
@@ -190,6 +217,53 @@ def verify_share(share: Share, params: PoWParams) -> Verdict:
         return Verdict(False, "syndrome mismatch on matched bits",
                        len(support), matched_count)
     return Verdict(True, "valid", len(support), matched_count)
+
+
+PQ_WITNESS_MAGIC = b"CHITINPQ"
+PQ_WITNESS_MAX_BYTES = 9 + 2 * 32
+
+
+def encode_pq_witness(support: tuple | list) -> bytes:
+    """Encode canonical fixed-profile support; reject rather than sort input.
+
+    Format: CHITINPQ (8 bytes), weight (u8), ascending indices (u16 LE).
+    Sorting is an explicit miner operation, never a parser normalization.
+    """
+    if not isinstance(support, (tuple, list)) or not 1 <= len(support) <= 32:
+        raise ShareError("wire support weight must be in [1,32]")
+    if any(type(j) is not int or not 0 <= j < 512 for j in support):
+        raise ShareError("wire column index must be an integer in [0,512)")
+    if any(a >= b for a, b in zip(support, support[1:])):
+        raise ShareError("wire support must be strictly ascending")
+    return PQ_WITNESS_MAGIC + bytes([len(support)]) + b"".join(
+        j.to_bytes(2, "little") for j in support
+    )
+
+
+def decode_pq_witness(witness: bytes) -> tuple[int, ...]:
+    """Reject malformed/noncanonical wire bytes before any instance hashing."""
+    if type(witness) is not bytes or not 11 <= len(witness) <= PQ_WITNESS_MAX_BYTES:
+        raise ShareError("invalid wire witness type or length")
+    if witness[:8] != PQ_WITNESS_MAGIC:
+        raise ShareError("invalid wire witness domain")
+    count = witness[8]
+    if not 1 <= count <= 32 or len(witness) != 9 + 2 * count:
+        raise ShareError("invalid wire witness count or length")
+    support = tuple(int.from_bytes(witness[i:i + 2], "little")
+                    for i in range(9, len(witness), 2))
+    if encode_pq_witness(support) != witness:
+        raise ShareError("noncanonical wire witness")
+    return support
+
+
+def verify_pq_witness(header: bytes, nonce: int, witness: bytes, matched_bits: int) -> Verdict:
+    """Fixed-profile wire validation followed by the mathematical verifier."""
+    try:
+        params = PoWParams(matched_bits=matched_bits)
+        support = decode_pq_witness(witness)
+    except (ShareError, TypeError, ValueError):
+        return Verdict(False, "malformed wire witness or difficulty", 0, 0)
+    return verify_share(Share(header, nonce, support), params)
 
 
 def expected_work_log2(params: PoWParams) -> float:
@@ -210,8 +284,12 @@ __all__ = [
     "Verdict",
     "derive_columns",
     "derive_instance",
+    "derive_selected_columns",
     "derive_target",
     "expected_work_log2",
     "syndrome_mask",
     "verify_share",
+    "encode_pq_witness",
+    "decode_pq_witness",
+    "verify_pq_witness",
 ]

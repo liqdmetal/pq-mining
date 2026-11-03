@@ -10,15 +10,15 @@ from pqmine.quantum_work import (
 
 
 class QuantumWorkTests(unittest.TestCase):
-    def test_recommended_profile_has_30_bit_quantum_isd_bound(self):
+    def test_asymptotic_extrapolation_is_not_concrete_grover_cost(self):
         attack = grover_bounded_support_work(
             512, 32, 164, syndrome_bits=256,
         )
-        # Quantum work is the min of naive Grover (t/2=82) and quantum ISD
-        # (0.05869*n = 30.05). The ISD bound is binding, so the modeled
-        # quantum work is ~30 bits, NOT 82.
+        # These are different models, not two calibrated concrete attacks.
         self.assertAlmostEqual(attack.quantum_isd_bits, 30.04928, places=3)
-        self.assertAlmostEqual(attack.grover_query_bits, 30.04928, places=3)
+        self.assertAlmostEqual(attack.grover_query_bits, 82.0, places=3)
+        self.assertFalse(attack.summary()["security_floor_established"])
+        self.assertIsNone(attack.summary()["finite_instance_quantum_security_bits"])
         self.assertTrue(attack.satisfiable_regime)
         self.assertGreater(attack.candidate_space_bits, 164.0)
 
@@ -32,10 +32,10 @@ class QuantumWorkTests(unittest.TestCase):
         result = best_modeled_quantum_work(
             512, 256, 32, 164, classical_attack_bits=82.446094,
         )
-        # Quantum ISD (30 bits) is cheaper than both classical MITM (82.4)
-        # and naive Grover (82), so it is the selected route.
         self.assertEqual(result["selected_route"], "generic-grover")
-        self.assertAlmostEqual(result["best_modeled_quantum_work_bits"], 30.04928, places=3)
+        self.assertAlmostEqual(result["best_modeled_quantum_work_bits"], 82.0, places=3)
+        self.assertAlmostEqual(result["quantum_isd_asymptotic_extrapolation_bits"], 30.04928, places=3)
+        self.assertFalse(result["security_floor_established"])
         self.assertIn("not a PQ security claim", result["warning"])
 
     def test_bad_parameters_rejected(self):

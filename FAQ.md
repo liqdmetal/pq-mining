@@ -6,15 +6,18 @@ experiment with a certified-looking spec but no certified security level,
 no production difficulty calibration, and no deployment.
 
 **Is it ASIC-proof / FPGA-proof / CPU-only?**
-No claim on any of those. Measured hardware results are GPU-favoured
-(4.5–16× GPU advantage at bench scale). The honest one-line pitch is
-"a post-quantum PoW with a bounded, measured GPU advantage" — nothing more.
+No claim on any of those. Synthetic per-unit results favour GPUs. Scaling
+both devices linearly is a projection, not a measured whole-chip ratio or
+a bound on the advantage of arbitrary miners. The verifier permits search
+algorithms that bypass the reference walk entirely.
 
 **Is it post-quantum secure?**
-No 128-bit PQ claim. The quantum ISD bound `0.05869·n` binds: at `n=512`
-that is ~30 bits. Clearing 128 bits needs `n ≥ 2181`; that profile exists
-but is not approved. The naive Grover `t/2` count is _not_ a conservative
-PQ bound — quantum ISD exploits code structure.
+No certified PQ security level. The `0.05869·n` expression is an asymptotic
+extrapolation from a particular decoding analysis, not a concrete attack
+cost or security floor for this finite partial-syndrome problem. Increasing
+n until that number exceeds 128 does not establish 128-bit security. The
+n=2304 candidate is unapproved. Generic Grover query counts also omit the
+oracle implementation and do not exclude better attacks.
 
 **What is the verified attack bound?**
 Bounded-language two-list MITM: **82.45-bit attack upper bound** at
@@ -30,10 +33,13 @@ There is no network, no wallet, no real coin.
 **What keeps the verifier honest?**
 The verifier accepts a share only when the support is non-empty, distinct,
 in-range, within `w_max`, and its XOR matches the target prefix; the nonce
-is bound into the instance, so replaying a support at another nonce fails.
+is bound into the instance, so another nonce requires a fresh check.
 Golden vectors in `tests/golden_vectors.json` pin the acceptance set;
 chain-side constants must match them (`PQ_MAX_WEIGHT=32` is the canonical
 example — the two drifted once and the retarget became meaningless).
+The fixed-profile corpus `tests/consensus_vectors_v1.json` additionally
+separates order-independent mathematical witnesses from ascending canonical
+CHITINPQ wire witnesses. Unsorted wire witnesses are rejected, not normalized.
 
 **Is the walk publicly replayable?**
 Yes. The walk is deterministic from the header; it feeds the column table.
