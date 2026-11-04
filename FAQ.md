@@ -1,9 +1,14 @@
-# FAQ — Chitin-PoW (research profile)
+# FAQ — Chitin-PQ proof of work (research profile)
 
 **Is this production consensus?**
 No. Research/testnet liveness only. It is a bounded-weight syndrome-decoding
-experiment with a certified-looking spec but no certified security level,
+experiment with an explicit specification but no certified security level,
 no production difficulty calibration, and no deployment.
+
+**Is Chitin-PQ proof of work integrated into Noumenon?**
+Yes, as a research implementation: the versioned verifier policy and
+`PQ_MAX_WEIGHT=32` are tied to the golden vectors in this repository. That
+does not establish production readiness or post-quantum security.
 
 **Is it ASIC-proof / FPGA-proof / CPU-only?**
 No claim on any of those. Synthetic per-unit results favour GPUs. Scaling

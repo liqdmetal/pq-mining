@@ -1,16 +1,19 @@
-# Chitin-PoW — research-only code-based PoW experiment
+# Chitin-PQ proof of work — research-only code-based PoW experiment
 
-**Status:** research repository. No deployment, network, wallet keys,
-real balances, consensus integration, or certified security level.
+**Status:** reference and experiment repository with a research integration in
+[Noumenon](https://github.com/liqdmetal/Noumenon). The local network harness here
+is a loopback proof of concept, not a production deployment or a certified
+security result.
 
 ## Lineage
 
-This is the **current PoW research track** of the Chitin family. The older
-confidential-transactions lab lives in
-[`chitin-pqct`](https://github.com/liqdmetal/chitin-pqct). The chain-side
-integration of this verifier (versioned proof language, `PQ_MAX_WEIGHT=32`
-matching the golden vectors here) is maintained out-of-band; feed only what
-these specs and vectors pin.
+This is the **Chitin-PQ proof-of-work research track**. Its verifier and
+versioned proof language are integrated into the Noumenon chain research
+implementation; the chain's `PQ_MAX_WEIGHT=32` policy matches the golden
+vectors here. This is research integration, not a production deployment or a
+security review. The separate confidential-transactions research track lives
+in [`chitin-pqct`](https://github.com/liqdmetal/chitin-pqct); it is not part
+of Noumenon's current payment path.
 
 ## Current design: option 2
 
